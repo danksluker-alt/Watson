@@ -137,10 +137,10 @@ export function startMockApi(port) {
     for (const block of msg.content) {
       if (block.type === 'text') {
         send('content_block_start', { type: 'content_block_start', index, content_block: { type: 'text', text: '' } })
-        // Stream a few words at a time, like the real API.
-        const words = block.text.split(/(?<= )/)
-        for (let i = 0; i < words.length; i += 3) {
-          send('content_block_delta', { type: 'content_block_delta', index, delta: { type: 'text_delta', text: words.slice(i, i + 3).join('') } })
+        // Stream small pieces that split words, like the real API does.
+        const pieces = block.text.match(/[\s\S]{1,7}/g) ?? []
+        for (let i = 0; i < pieces.length; i += 2) {
+          send('content_block_delta', { type: 'content_block_delta', index, delta: { type: 'text_delta', text: pieces.slice(i, i + 2).join('') } })
           await new Promise((r) => setTimeout(r, 25))
         }
       } else {

@@ -91,7 +91,7 @@ export function stockForModel(s: StockData) {
     name: s.name,
     price: `${s.price.toFixed(2)} ${s.currency}`,
     change: `${sign}${s.change.toFixed(2)} (${sign}${s.changePct.toFixed(2)}%) over ${s.range}`,
-    market: s.marketState ?? 'unknown',
+    ...(s.marketState ? { market: s.marketState.toLowerCase() } : {}),
     widget: 'shown to the user already',
   }
 }

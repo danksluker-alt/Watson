@@ -340,6 +340,7 @@ function systemPrompt(settings: Settings, spoken: boolean): string {
     'Calendar events and reminders you add take effect right away: repeat back what you added.',
     'Use delegate for coding, website changes, email, calendar, documents and anything needing the user\'s connectors. Then say in a few words that you handed it off.',
     'Never claim you did something you did not do. If you are unsure, say so.',
+    'Call only the tools the current request needs; earlier answers in the conversation are already on screen or were already said.',
     'Say each thing once: after a tool runs, do not add a closing line like "Done." or repeat what the widget shows.',
     `Today is ${today}. Home city: ${settings.homeCity}. Units: °${settings.units}.`,
     memoryPrompt(),
@@ -414,8 +415,11 @@ export class Brain {
       // few characters so a bare "Done." after a real answer can be dropped.
       let held = ''
       let passing = !shown
+      let firstOfRound = true
       const emit = (d: string) => {
-        if (shown && !/\s$/.test(shown) && !/^\s/.test(d)) d = ` ${d}`
+        // Only the first piece of a later round needs a space in front of it.
+        if (firstOfRound && shown && !/\s$/.test(shown) && !/^\s/.test(d)) d = ` ${d}`
+        firstOfRound = false
         shown += d
         opts.onText(d)
       }
@@ -702,7 +706,7 @@ export class Brain {
           if (!found.length) return `No files found for "${query}".`
           const day = (ms: number) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
           host.addBlocks([{ type: 'list', items: found.map((f) => ({ title: f.name, detail: f.folder, meta: `${f.kind} · ${day(f.modified)}` })) }], { title: `Files matching “${query}”` })
-          return JSON.stringify(found.map((f) => ({ name: f.name, path: f.path, modified: day(f.modified) })))
+          return JSON.stringify({ files: found.map((f) => ({ name: f.name, path: f.path, modified: day(f.modified) })), list: 'shown to the user already; do not show it again' })
         } catch (e) {
           host.finishActivity(a, false)
           throw e

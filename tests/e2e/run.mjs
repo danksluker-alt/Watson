@@ -131,6 +131,8 @@ await scenario('Live voice: weather with widget and spoken answer', async () => 
   await talk("What's the weather in Lisbon this weekend?")
   await overlay.waitForSelector('.weather', { timeout: 10_000 })
   await until(async () => (await spokenText()).includes('Lisbon'), 8000)
+  // The API streams pieces that split words; they must join back exactly.
+  await until(async () => (await spokenText()).includes('mostly sunny in Lisbon right now. Rain moves in over the weekend'), 8000)
   await shot('02-weather')
   const reqs = (await apiRequests()).filter((r) => r.text.includes('weather'))
   assert(reqs[0]?.model === 'claude-haiku-5-5', `used ${reqs[0]?.model}`)

@@ -16,6 +16,19 @@ export const AGENT_PRESETS: AgentTarget[] = [
   { id: 'perplexity', name: 'Perplexity', kind: 'web', url: 'https://www.perplexity.ai/', enabled: false },
 ]
 
+/** A sensible home city before the user picks one: the city in the Mac's time zone ("America/Denver" → "Denver"). */
+function cityFromTimeZone(): string {
+  const tz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? ''
+  const city = tz.includes('/') ? tz.split('/').pop()!.replace(/_/g, ' ') : ''
+  return city && !/^(UTC|GMT)/i.test(city) ? city : 'New York'
+}
+
+/** Celsius everywhere except the few places that use Fahrenheit. */
+function unitsFromLocale(): 'C' | 'F' {
+  const region = Intl.DateTimeFormat().resolvedOptions().locale.split('-')[1] ?? 'US'
+  return ['US', 'LR', 'MM', 'BS', 'BZ', 'KY', 'PW'].includes(region.toUpperCase()) ? 'F' : 'C'
+}
+
 export const DEFAULT_SETTINGS: Settings = {
   hotkey: 'Alt+Space',
   reviewHotkey: 'Alt+Shift+Space',
@@ -24,8 +37,8 @@ export const DEFAULT_SETTINGS: Settings = {
   musicApp: 'spotify',
   browserBundleId: '',
   pinned: [],
-  homeCity: 'New York',
-  units: 'F',
+  homeCity: cityFromTimeZone(),
+  units: unitsFromLocale(),
   speechLocale: 'en-US',
   voiceId: '',
   speechRate: 0.52,
