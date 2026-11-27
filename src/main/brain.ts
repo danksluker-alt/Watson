@@ -340,12 +340,16 @@ function systemPrompt(settings: Settings, spoken: boolean): string {
     'Calendar events and reminders you add take effect right away: repeat back what you added.',
     'Use delegate for coding, website changes, email, calendar, documents and anything needing the user\'s connectors. Then say in a few words that you handed it off.',
     'Never claim you did something you did not do. If you are unsure, say so.',
+    'Say each thing once: after a tool runs, do not add a closing line like "Done." or repeat what the widget shows.',
     `Today is ${today}. Home city: ${settings.homeCity}. Units: °${settings.units}.`,
     memoryPrompt(),
   ]
     .filter(Boolean)
     .join('\n')
 }
+
+/** A closing line that adds nothing after a real answer. */
+const FILLER = /^(done|shown|all set|okay|ok|there you go|here you go|got it)[.!]?$/i
 
 const toolName = (t: Anthropic.Beta.BetaToolUnion) => ('name' in t ? t.name : '')
 
@@ -402,11 +406,31 @@ export class Brain {
     const messages: Msg[] = [...this.history, { role: 'user', content: `${text}\n\n(Local time: ${now})` }]
     const toolsUsed: string[] = []
     let finalText = ''
+    let shown = ''
 
     for (let round = 0; round < 6; round++) {
       let message: Anthropic.Beta.BetaMessage
+      // Later rounds follow tool calls. Keep a space between rounds, and hold back their first
+      // few characters so a bare "Done." after a real answer can be dropped.
+      let held = ''
+      let passing = !shown
+      const emit = (d: string) => {
+        if (shown && !/\s$/.test(shown) && !/^\s/.test(d)) d = ` ${d}`
+        shown += d
+        opts.onText(d)
+      }
+      const onText = (d: string) => {
+        if (passing) return emit(d)
+        held += d
+        if (held.trim().length >= 16) {
+          passing = true
+          emit(held.trimStart())
+          held = ''
+        }
+      }
       try {
-        message = await this.stream(client, model, settings, opts.spoken, tools, messages, opts)
+        message = await this.stream(client, model, settings, opts.spoken, tools, messages, { signal: opts.signal, onText })
+        if (held.trim() && !FILLER.test(held.trim())) emit(held.trimStart())
       } catch (err) {
         if (err instanceof Anthropic.BadRequestError && /web_search/i.test(err.message) && tools.some((t) => toolName(t) === 'web_search')) {
           this.webSearchBroken.add(model)
@@ -417,7 +441,7 @@ export class Brain {
         throw err
       }
       const roundText = message.content.map((b) => (b.type === 'text' ? b.text : '')).join('').trim()
-      if (roundText) finalText = finalText ? `${finalText} ${roundText}` : roundText
+      if (roundText && !(finalText && FILLER.test(roundText))) finalText = finalText ? `${finalText} ${roundText}` : roundText
 
       if (message.stop_reason === 'refusal') {
         finalText ||= "I can't help with that one."

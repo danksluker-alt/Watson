@@ -120,6 +120,11 @@ await scenario('Pill at rest', async () => {
   await shot('01-pill')
   const label = await overlay.textContent('.pill')
   assert(label.includes('Watson'), `pill says "${label}"`)
+  await overlay.click('.pill')
+  await until(async () => (await helper('/state')).listening, 4000)
+  await overlay.mouse.move(5, 700)
+  await shot('01b-listening')
+  await overlay.evaluate(() => window.watson.cancel())
 })
 
 await scenario('Live voice: weather with widget and spoken answer', async () => {
