@@ -11,10 +11,15 @@ extraResources:
 mac:
   target: dir
   category: public.app-category.productivity
+  icon: resources/icon.png
   identity: null
   hardenedRuntime: false
   extendInfo:
     LSUIElement: true
     NSMicrophoneUsageDescription: Watson listens when you press the hotkey or click the pill.
     NSSpeechRecognitionUsageDescription: Watson turns your voice into text on this Mac.
-    NSAppleEventsUsageDescription: Watson controls Spotify and types your requests into your AI apps when you ask.
+    NSAppleEventsUsageDescription: Watson controls Spotify, Music and Notes, and types your requests into your AI apps when you ask.
+    NSCalendarsFullAccessUsageDescription: Watson shows your schedule and adds events when you ask.
+    NSCalendarsUsageDescription: Watson shows your schedule and adds events when you ask.
+    NSRemindersFullAccessUsageDescription: Watson shows and adds reminders when you ask.
+    NSRemindersUsageDescription: Watson shows and adds reminders when you ask.

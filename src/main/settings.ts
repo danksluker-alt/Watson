@@ -4,10 +4,26 @@
 import { app, safeStorage } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { SecretName, SecretStatus, Settings } from '@shared/types'
+import type { AgentTarget, SecretName, SecretStatus, Settings } from '@shared/types'
+
+export const AGENT_PRESETS: AgentTarget[] = [
+  { id: 'claude', name: 'Claude', kind: 'app', bundleId: 'com.anthropic.claudefordesktop', enabled: true },
+  { id: 'grok', name: 'Grok', kind: 'web', url: 'https://grok.com/', enabled: true },
+  { id: 'chatgpt', name: 'ChatGPT', kind: 'app', bundleId: 'com.openai.chat', enabled: false },
+  { id: 'gemini', name: 'Gemini', kind: 'web', url: 'https://gemini.google.com/app', enabled: false },
+  { id: 'claude-web', name: 'Claude (web)', kind: 'web', url: 'https://claude.ai/new', enabled: false },
+  { id: 'chatgpt-web', name: 'ChatGPT (web)', kind: 'web', url: 'https://chatgpt.com/', enabled: false },
+  { id: 'perplexity', name: 'Perplexity', kind: 'web', url: 'https://www.perplexity.ai/', enabled: false },
+]
 
 export const DEFAULT_SETTINGS: Settings = {
   hotkey: 'Alt+Space',
+  reviewHotkey: 'Alt+Shift+Space',
+  inputMode: 'live',
+  sounds: true,
+  musicApp: 'spotify',
+  browserBundleId: '',
+  pinned: [],
   homeCity: 'New York',
   units: 'F',
   speechLocale: 'en-US',
@@ -21,10 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   confirmHandoffs: false,
   returnFocusAfterHandoff: true,
   defaultAgent: 'claude',
-  agents: [
-    { id: 'claude', name: 'Claude', bundleId: 'com.anthropic.claudefordesktop', enabled: true },
-    { id: 'chatgpt', name: 'ChatGPT', bundleId: 'com.openai.chat', enabled: false },
-  ],
+  agents: AGENT_PRESETS,
 }
 
 const SECRET_NAMES: SecretName[] = ['anthropic', 'xai', 'spotifyClientId', 'spotifyClientSecret']
@@ -47,7 +60,14 @@ function writeJson(name: string, value: unknown) {
 let cached: Settings | null = null
 
 export function getSettings(): Settings {
-  if (!cached) cached = { ...DEFAULT_SETTINGS, ...readJson<Partial<Settings>>('settings.json', {}) }
+  if (!cached) {
+    const saved = readJson<Partial<Settings>>('settings.json', {})
+    cached = { ...DEFAULT_SETTINGS, ...saved }
+    // Older settings files have agents without a kind; newer presets may be missing.
+    const agents = (saved.agents ?? AGENT_PRESETS).map((a) => ({ ...a, kind: a.kind ?? 'app' }) as AgentTarget)
+    for (const preset of AGENT_PRESETS) if (!agents.some((a) => a.id === preset.id)) agents.push({ ...preset, enabled: false })
+    cached.agents = agents
+  }
   return cached
 }
 
@@ -61,7 +81,9 @@ type SecretFile = Partial<Record<SecretName, string>>
 
 export function getSecret(name: SecretName): string | null {
   const enc = readJson<SecretFile>('secrets.json', {})[name]
-  if (!enc || !safeStorage.isEncryptionAvailable()) return null
+  // Developers and tests can supply the API key through the environment instead.
+  if (!enc) return name === 'anthropic' ? (process.env.ANTHROPIC_API_KEY ?? null) : null
+  if (!safeStorage.isEncryptionAvailable()) return null
   try {
     return safeStorage.decryptString(Buffer.from(enc, 'base64'))
   } catch {
@@ -83,5 +105,7 @@ export function setSecret(name: SecretName, value: string): SecretStatus {
 
 export function secretStatus(): SecretStatus {
   const all = readJson<SecretFile>('secrets.json', {})
-  return Object.fromEntries(SECRET_NAMES.map((n) => [n, Boolean(all[n])])) as SecretStatus
+  const status = Object.fromEntries(SECRET_NAMES.map((n) => [n, Boolean(all[n])])) as SecretStatus
+  if (!status.anthropic && process.env.ANTHROPIC_API_KEY) status.anthropic = true
+  return status
 }

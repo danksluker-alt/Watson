@@ -8,13 +8,19 @@
 //     the model only sees a one-line summary of them.
 import Anthropic from '@anthropic-ai/sdk'
 import { z } from 'zod'
-import type { Block, Panel, Settings, StockRange } from '@shared/types'
+import type { Block, MusicApp, Panel, Settings, StockRange, WidgetKind } from '@shared/types'
+import type { Helper } from './helper'
+import type { ScreenChoice } from './pinned'
 import { getSecret, getSettings } from './settings'
 import { record, spentToday } from './usage'
 import { getWeather, weatherForModel } from './tools/weather'
 import { getStock, stockForModel } from './tools/stocks'
-import * as spotify from './tools/spotify'
+import * as music from './tools/music'
 import { openApp, openFile, openUrl } from './tools/system'
+import { addEvent, addReminder, calendarForModel, getCalendar, getReminders, remindersForModel } from './tools/calendar'
+import { createNote, notesForModel, readNote, recentNotes, searchNotes } from './tools/notes'
+import { clockForModel, worldClock } from './tools/clock'
+import { battery } from './tools/battery'
 
 export const HAIKU = 'claude-haiku-5-5'
 export const SONNET = 'claude-sonnet-5-5'
@@ -27,7 +33,11 @@ export type ToolHost = {
   activity: (text: string) => string
   finishActivity: (id: string, ok: boolean, text?: string) => void
   /** Hand a request to another AI app. Resolves once it has been queued. */
-  delegate: (agentId: string, prompt: string, sensitive: boolean) => Promise<string>
+  delegate: (agentId: string, prompt: string, sensitive: boolean, newChat: boolean) => Promise<string>
+  /** Put a widget on a screen as a floating window. */
+  pin: (kind: WidgetKind, params: Record<string, string>, screen: ScreenChoice) => Promise<string>
+  unpin: (kind: WidgetKind | 'all') => void
+  helper: Helper
 }
 
 export class BudgetError extends Error {}
@@ -60,13 +70,29 @@ const PanelBlock = z.discriminatedUnion('type', [
 const ShowPanelInput = z.object({ title: z.string().optional(), subtitle: z.string().optional(), blocks: z.array(PanelBlock).min(1) })
 const WeatherInput = z.object({ location: z.string().optional() })
 const StockInput = z.object({ symbol: z.string().min(1), range: z.enum(['1D', '1W', '1M', '3M', '1Y']).optional() })
-const SpotifyInput = z.object({
+const MusicInput = z.object({
   action: z.enum(['play', 'pause', 'resume', 'next', 'previous', 'now_playing']),
   query: z.string().optional(),
   kind: z.enum(['track', 'album', 'playlist', 'artist']).optional(),
+  app: z.enum(['spotify', 'apple_music']).optional(),
 })
 const OpenInput = z.object({ kind: z.enum(['app', 'url', 'file']), target: z.string().min(1) })
-const DelegateInput = z.object({ agent: z.string(), request: z.string().min(1), sensitive: z.boolean() })
+const DelegateInput = z.object({ agent: z.string(), request: z.string().min(1), sensitive: z.boolean(), new_chat: z.boolean().optional() })
+const CalendarInput = z.object({ range: z.string().optional() })
+const AddEventInput = z.object({ title: z.string().min(1), start: z.string(), end: z.string().optional(), all_day: z.boolean().optional(), location: z.string().optional() })
+const RemindersInput = z.object({ list: z.string().optional() })
+const AddReminderInput = z.object({ title: z.string().min(1), due: z.string().optional(), list: z.string().optional() })
+const NotesInput = z.object({ action: z.enum(['recent', 'search', 'read', 'create']), query: z.string().optional(), title: z.string().optional(), body: z.string().optional() })
+const ClockInput = z.object({ cities: z.array(z.string()).max(5) })
+const WIDGETS = ['weather', 'stock', 'calendar', 'reminders', 'notes', 'clock', 'battery', 'now_playing'] as const
+const PinInput = z.object({
+  action: z.enum(['pin', 'unpin']),
+  widget: z.enum([...WIDGETS, 'all']),
+  location: z.string().optional(),
+  symbol: z.string().optional(),
+  cities: z.array(z.string()).optional(),
+  screen: z.union([z.enum(['this', 'main', 'other']), z.number().int().min(1).max(6)]).optional(),
+})
 
 function toolDefs(settings: Settings): Anthropic.Beta.BetaToolUnion[] {
   const agents = settings.agents.filter((a) => a.enabled)
@@ -117,16 +143,82 @@ function toolDefs(settings: Settings): Anthropic.Beta.BetaToolUnion[] {
       },
     },
     {
-      name: 'spotify',
-      description: 'Control the Spotify app on this Mac and show what is playing.',
+      name: 'music',
+      description: `Control Spotify or Apple Music on this Mac and show what's playing. Default app: ${settings.musicApp === 'music' ? 'apple_music' : 'spotify'}.`,
       input_schema: {
         type: 'object',
         properties: {
           action: { type: 'string', enum: ['play', 'pause', 'resume', 'next', 'previous', 'now_playing'] },
           query: { type: 'string', description: 'For play: song, album, artist or playlist name' },
           kind: { type: 'string', enum: ['track', 'album', 'playlist', 'artist'] },
+          app: { type: 'string', enum: ['spotify', 'apple_music'] },
         },
         required: ['action'],
+      },
+    },
+    {
+      name: 'get_calendar',
+      description: 'Show events from the user\'s Apple Calendar (all their accounts). Draws a calendar widget.',
+      input_schema: { type: 'object', properties: { range: { type: 'string', description: '"today", "tomorrow", "week", or a date YYYY-MM-DD' } } },
+    },
+    {
+      name: 'add_calendar_event',
+      description: 'Add an event to the user\'s default calendar. Times are local, format YYYY-MM-DDTHH:mm.',
+      input_schema: {
+        type: 'object',
+        properties: { title: { type: 'string' }, start: { type: 'string' }, end: { type: 'string' }, all_day: { type: 'boolean' }, location: { type: 'string' } },
+        required: ['title', 'start'],
+      },
+    },
+    {
+      name: 'get_reminders',
+      description: 'Show incomplete reminders from Apple Reminders. Draws a reminders widget.',
+      input_schema: { type: 'object', properties: { list: { type: 'string', description: 'List name, e.g. "Groceries". Omit for all lists.' } } },
+    },
+    {
+      name: 'add_reminder',
+      description: 'Add a reminder to Apple Reminders. Due time is local, format YYYY-MM-DDTHH:mm.',
+      input_schema: { type: 'object', properties: { title: { type: 'string' }, due: { type: 'string' }, list: { type: 'string' } }, required: ['title'] },
+    },
+    {
+      name: 'notes',
+      description: 'Apple Notes: list recent notes, search them, read one, or create a new note. Draws a notes widget.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['recent', 'search', 'read', 'create'] },
+          query: { type: 'string', description: 'For search/read: words in the title or text' },
+          title: { type: 'string', description: 'For create' },
+          body: { type: 'string', description: 'For create: plain text, new lines allowed' },
+        },
+        required: ['action'],
+      },
+    },
+    {
+      name: 'world_clock',
+      description: 'Show the time in other cities as clock widgets.',
+      input_schema: { type: 'object', properties: { cities: { type: 'array', items: { type: 'string' } } }, required: ['cities'] },
+    },
+    {
+      name: 'battery',
+      description: 'Show the Mac\'s battery level and charging state.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'pin_widget',
+      description:
+        'Pin a live widget to the screen as a small floating window that stays and refreshes itself, or remove pinned widgets. Screens: "this" (where the user is), "main", "other" (another display), or a display number.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['pin', 'unpin'] },
+          widget: { type: 'string', enum: [...WIDGETS, 'all'] },
+          location: { type: 'string', description: 'For weather' },
+          symbol: { type: 'string', description: 'For stock' },
+          cities: { type: 'array', items: { type: 'string' }, description: 'For clock' },
+          screen: { description: '"this", "main", "other" or a number', anyOf: [{ type: 'string', enum: ['this', 'main', 'other'] }, { type: 'integer' }] },
+        },
+        required: ['action', 'widget'],
       },
     },
     {
@@ -143,13 +235,14 @@ function toolDefs(settings: Settings): Anthropic.Beta.BetaToolUnion[] {
     tools.push({
       name: 'delegate',
       description:
-        `Type a request into one of the user's AI apps, which have their own tools and connectors (Gmail, Calendar, Drive, code, files, web research). Use it for: coding or changing their website/projects, anything needing their email/calendar/documents, long research, or when they name the agent. The answer comes back later and is summarized for the user. Available agents: ${agents.map((a) => `${a.id} (${a.name})`).join(', ')}. Default: ${settings.defaultAgent}.`,
+        `Type a request into one of the user's AI agents (Mac apps or chat websites), which have their own tools and connectors (Gmail, Drive, code, files, web research, X/Twitter for Grok). Use it for: coding or changing their website/projects, anything needing their email or documents, long research, or whenever they name the agent ("ask Grok…"). The answer comes back later and is summarized for the user. Agents: ${agents.map((a) => `${a.id} (${a.name})`).join(', ')}. Default: ${settings.defaultAgent}.`,
       input_schema: {
         type: 'object',
         properties: {
           agent: { type: 'string', enum: agents.map((a) => a.id) },
           request: { type: 'string', description: 'A clear, complete prompt written as the user, keeping every detail they gave.' },
           sensitive: { type: 'boolean', description: 'true if it would send, post, delete, buy or change something that cannot be undone' },
+          new_chat: { type: 'boolean', description: 'false only when this follows up on the previous request to the same agent' },
         },
         required: ['agent', 'request', 'sensitive'],
       },
@@ -166,7 +259,9 @@ function systemPrompt(settings: Settings, spoken: boolean): string {
       ? 'Your reply is spoken aloud: 1 to 3 short, natural sentences. No markdown, no lists, no URLs in what you say.'
       : 'The user typed this. Reply briefly in plain text.',
     'When an answer is better seen (steps, comparisons, tables, numbers, code), call show_panel and say only one sentence.',
-    'get_weather, get_stock and spotify draw their own widgets; after using them, just say the key fact.',
+    'Widget tools (weather, stocks, music, calendar, reminders, notes, clock, battery) draw their own widgets; after using them, just say the key fact.',
+    'When the user wants something kept on screen ("pin", "keep it up", "put it on my other screen"), use pin_widget.',
+    'Calendar events and reminders you add take effect right away: repeat back what you added.',
     'Use delegate for coding, website changes, email, calendar, documents and anything needing the user\'s connectors. Then say in a few words that you handed it off.',
     'Never claim you did something you did not do. If you are unsure, say so.',
     `Today is ${today}. Home city: ${settings.homeCity}. Units: °${settings.units}.`,
@@ -223,7 +318,9 @@ export class Brain {
           : { type: 'web_search_20250305', name: 'web_search', max_uses: 2 },
       )
     }
-    const messages: Msg[] = [...this.history, { role: 'user', content: text }]
+    const now = new Date().toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
+    // The time goes on this message only, so the cached system prompt stays the same all day.
+    const messages: Msg[] = [...this.history, { role: 'user', content: `${text}\n\n(Local time: ${now})` }]
     const toolsUsed: string[] = []
     let finalText = ''
 
@@ -240,7 +337,8 @@ export class Brain {
         }
         throw err
       }
-      for (const b of message.content) if (b.type === 'text') finalText += b.text
+      const roundText = message.content.map((b) => (b.type === 'text' ? b.text : '')).join('').trim()
+      if (roundText) finalText = finalText ? `${finalText} ${roundText}` : roundText
 
       if (message.stop_reason === 'refusal') {
         finalText ||= "I can't help with that one."
@@ -341,26 +439,129 @@ export class Brain {
           throw new Error(`Couldn't get ${symbol}: ${e instanceof Error ? e.message : e}`)
         }
       }
-      case 'spotify': {
-        const { action, query, kind } = SpotifyInput.parse(input)
-        const a = host.activity(action === 'play' ? `Finding ${query ?? 'music'} on Spotify` : 'Talking to Spotify')
+      case 'music': {
+        const { action, query, kind, app } = MusicInput.parse(input)
+        const which: MusicApp = app === 'apple_music' ? 'music' : app === 'spotify' ? 'spotify' : settings.musicApp
+        const label = which === 'music' ? 'Music' : 'Spotify'
+        const a = host.activity(action === 'play' && query ? `Finding ${query} on ${label}` : `Talking to ${label}`)
         try {
           let result = 'Done.'
           if (action === 'play') {
-            if (!query) await spotify.control('resume')
-            else result = await spotify.play(query, kind ?? 'track')
+            if (!query) await music.control(which, 'resume')
+            else result = await music.play(which, query, kind ?? 'track')
           } else if (action !== 'now_playing') {
-            await spotify.control(action)
+            await music.control(which, action)
           }
           await new Promise((r) => setTimeout(r, 700))
-          const np = await spotify.nowPlaying().catch(() => null)
+          const np = await music.nowPlaying(which).catch(() => null)
           if (np) host.addBlocks([{ type: 'nowPlaying', data: np }])
           host.finishActivity(a, true)
           return np ? `${result} Now ${np.state}: ${np.title} by ${np.artist}.` : result
         } catch (e) {
           host.finishActivity(a, false)
-          throw new Error(`Spotify: ${e instanceof Error ? e.message : e}. Is the Spotify app installed, and is Automation allowed for Watson?`)
+          throw new Error(`${label}: ${e instanceof Error ? e.message : e}. Is the app installed, and is Automation allowed for Watson?`)
         }
+      }
+      case 'get_calendar': {
+        const { range } = CalendarInput.parse(input)
+        const a = host.activity('Checking your calendar')
+        try {
+          const c = await getCalendar(host.helper, range || 'today')
+          host.addBlocks([{ type: 'calendar', data: c }])
+          host.finishActivity(a, true)
+          return JSON.stringify(calendarForModel(c))
+        } catch (e) {
+          host.finishActivity(a, false)
+          throw e
+        }
+      }
+      case 'add_calendar_event': {
+        const e = AddEventInput.parse(input)
+        const a = host.activity(`Adding “${e.title}” to your calendar`)
+        try {
+          const r = await addEvent(host.helper, { title: e.title, start: e.start, end: e.end, allDay: e.all_day, location: e.location })
+          const c = await getCalendar(host.helper, r.date, e.title)
+          host.addBlocks([{ type: 'calendar', data: c }])
+          host.finishActivity(a, true)
+          return r.summary
+        } catch (err) {
+          host.finishActivity(a, false)
+          throw err
+        }
+      }
+      case 'get_reminders': {
+        const { list } = RemindersInput.parse(input)
+        const a = host.activity('Checking your reminders')
+        try {
+          const r = await getReminders(host.helper, list)
+          host.addBlocks([{ type: 'reminders', data: r }])
+          host.finishActivity(a, true)
+          return JSON.stringify(remindersForModel(r))
+        } catch (e) {
+          host.finishActivity(a, false)
+          throw e
+        }
+      }
+      case 'add_reminder': {
+        const r = AddReminderInput.parse(input)
+        const a = host.activity(`Adding “${r.title}” to Reminders`)
+        try {
+          const msg = await addReminder(host.helper, r)
+          const list = await getReminders(host.helper, r.list, r.title)
+          host.addBlocks([{ type: 'reminders', data: list }])
+          host.finishActivity(a, true)
+          return msg
+        } catch (e) {
+          host.finishActivity(a, false)
+          throw e
+        }
+      }
+      case 'notes': {
+        const n = NotesInput.parse(input)
+        const a = host.activity(n.action === 'create' ? 'Creating a note' : n.action === 'recent' ? 'Opening your notes' : `Looking for “${n.query ?? ''}” in Notes`)
+        try {
+          const data =
+            n.action === 'recent'
+              ? await recentNotes()
+              : n.action === 'search'
+                ? await searchNotes(n.query ?? '')
+                : n.action === 'read'
+                  ? await readNote(n.query ?? n.title ?? '')
+                  : await createNote(n.title ?? 'New note', n.body ?? '')
+          host.addBlocks([{ type: 'notes', data }])
+          host.finishActivity(a, true)
+          return n.action === 'create' ? `Created the note “${n.title ?? 'New note'}”.` : JSON.stringify(notesForModel(data))
+        } catch (e) {
+          host.finishActivity(a, false)
+          throw new Error(`Notes: ${e instanceof Error ? e.message : e}`)
+        }
+      }
+      case 'world_clock': {
+        const { cities } = ClockInput.parse(input)
+        const c = await worldClock(cities)
+        host.addBlocks([{ type: 'clock', data: c }])
+        return JSON.stringify(clockForModel(c))
+      }
+      case 'battery': {
+        const b = await battery()
+        host.addBlocks([{ type: 'battery', data: b }])
+        return b.percent === null ? 'This Mac has no battery (it is on power).' : `${b.percent}%, ${b.state}${b.timeRemaining ? `, ${b.timeRemaining} left` : ''}.`
+      }
+      case 'pin_widget': {
+        const p = PinInput.parse(input)
+        const kind = (p.widget === 'now_playing' ? 'nowPlaying' : p.widget) as WidgetKind | 'all'
+        if (p.action === 'unpin') {
+          host.unpin(kind)
+          return kind === 'all' ? 'Removed all pinned widgets.' : `Removed the pinned ${p.widget.replace('_', ' ')} widget.`
+        }
+        if (kind === 'all') throw new Error('Pin one widget at a time.')
+        const params: Record<string, string> = {}
+        if (p.location) params.location = p.location
+        if (p.symbol) params.symbol = p.symbol.toUpperCase()
+        if (p.cities?.length) params.cities = p.cities.join(',')
+        if (kind === 'nowPlaying') params.app = settings.musicApp
+        await host.pin(kind, params, p.screen ?? 'this')
+        return `Pinned the ${p.widget.replace('_', ' ')} widget to the ${typeof p.screen === 'number' ? `screen ${p.screen}` : p.screen === 'other' ? 'other screen' : p.screen === 'main' ? 'main screen' : 'screen'}. It refreshes on its own and can be dragged anywhere.`
       }
       case 'open': {
         const { kind, target } = OpenInput.parse(input)
@@ -375,8 +576,8 @@ export class Brain {
         }
       }
       case 'delegate': {
-        const { agent, request, sensitive } = DelegateInput.parse(input)
-        return host.delegate(agent, request, sensitive)
+        const { agent, request, sensitive, new_chat } = DelegateInput.parse(input)
+        return host.delegate(agent, request, sensitive, new_chat ?? true)
       }
       default:
         throw new Error(`Unknown tool ${name}`)
@@ -409,7 +610,9 @@ export class Brain {
         output_config: { effort: 'low' },
       })
       record(HAIKU, message.usage)
-      for (const b of message.content) if (b.type === 'text') spoken += b.text
+      // Keep the first real summary; later rounds (after show_panel) only add filler like "Done."
+      const roundText = message.content.map((b) => (b.type === 'text' ? b.text : '')).join('').trim()
+      if (!spoken && roundText) spoken = roundText
       const calls = message.content.filter((b): b is Anthropic.Beta.BetaToolUseBlock => b.type === 'tool_use')
       if (!calls.length) break
       messages.push({ role: 'assistant', content: message.content })

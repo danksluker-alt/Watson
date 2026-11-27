@@ -84,6 +84,25 @@ export const Sparkle = ({ size, ...p }: P) => (
   </svg>
 )
 
+export const Pin = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p} fill="currentColor">
+    <path d="M14.8 2.6a1.2 1.2 0 0 1 1.7 0l4.9 4.9a1.2 1.2 0 0 1 0 1.7l-1.1 1.1a1.2 1.2 0 0 1-1.1.3l-3.6 3.6.2 3.2a1.2 1.2 0 0 1-.4 1l-.9.8a1.2 1.2 0 0 1-1.7 0l-3.3-3.3-4.4 4.4a1 1 0 0 1-1.4-1.4l4.4-4.4-3.3-3.3a1.2 1.2 0 0 1 0-1.7l.8-.9a1.2 1.2 0 0 1 1-.4l3.2.2 3.6-3.6a1.2 1.2 0 0 1 .3-1.1z" />
+  </svg>
+)
+
+export const Pencil = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p} stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16v4z" />
+    <path d="M13.5 6.5l4 4" />
+  </svg>
+)
+
+export const InsertText = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p} stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 7V5h16v2M12 5v14M9 19h6" />
+  </svg>
+)
+
 // ---------------- Weather (multicolor, like SF Symbols) ----------------
 
 const SUN = '#FFD60A'

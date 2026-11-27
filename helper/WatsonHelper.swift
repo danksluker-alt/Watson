@@ -15,6 +15,7 @@
 import AppKit
 import ApplicationServices
 import AVFoundation
+import EventKit
 import Foundation
 import Speech
 
@@ -61,6 +62,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     var engineRunning = false
     var echoCancellation = true
     var inputConverter: AVAudioConverter?
+    var convErrorLogged = false
     var stopEngineWork: DispatchWorkItem?
 
     // Recognition (main-thread state, except `request`, which the audio thread reads)
@@ -91,6 +93,15 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     override init() {
         super.init()
         synth.delegate = self
+        // Plugging in AirPods or switching output stops the engine; rebuild it if we still need it.
+        NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            self.engineRunning = false
+            self.engine.inputNode.removeTap(onBus: 0)
+            if self.listening || self.isSpeaking {
+                do { try self.ensureEngine() } catch { emit(["ev": "error", "message": error.localizedDescription]) }
+            }
+        }
     }
 
     var isSpeaking: Bool { writingUtterance != nil || pending > 0 || !queue.isEmpty }
@@ -99,7 +110,8 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
 
     func ensureEngine() throws {
         stopEngineWork?.cancel()
-        if engineRunning { return }
+        if engineRunning && engine.isRunning { return }
+        engineRunning = false
         let input = engine.inputNode
         if echoCancellation {
             do {
@@ -112,6 +124,8 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
             } catch {
                 log("Echo cancellation unavailable: \(error.localizedDescription)")
             }
+        } else if input.isVoiceProcessingEnabled {
+            try? input.setVoiceProcessingEnabled(false)
         }
         if player.engine == nil {
             engine.attach(player)
@@ -121,14 +135,16 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         guard inFormat.sampleRate > 0, inFormat.channelCount > 0 else {
             throw NSError(domain: "watson", code: 1, userInfo: [NSLocalizedDescriptionKey: "No microphone input. Check Microphone permission in System Settings."])
         }
-        inputConverter = AVAudioConverter(from: inFormat, to: recFormat)
         input.removeTap(onBus: 0)
+        inputConverter = AVAudioConverter(from: inFormat, to: recFormat)
+        if inFormat.channelCount > 1 { inputConverter?.channelMap = [0] }
         input.installTap(onBus: 0, bufferSize: 1024, format: inFormat) { [weak self] buffer, _ in
             self?.handleInput(buffer)
         }
         engine.prepare()
         try engine.start()
         engineRunning = true
+        player.play() // no-op if already playing; needed after an engine restart
     }
 
     /// Release the microphone (and the orange dot) shortly after we stop needing it.
@@ -137,6 +153,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         let work = DispatchWorkItem { [weak self] in
             guard let self, !self.listening, !self.isSpeaking, self.engineRunning else { return }
             self.engine.inputNode.removeTap(onBus: 0)
+            self.player.stop()
             self.engine.stop()
             self.engineRunning = false
         }
@@ -170,7 +187,11 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
             status.pointee = .haveData
             return buffer
         }
-        if err == nil, out.frameLength > 0 { req.append(out) }
+        if let err {
+            if !convErrorLogged { convErrorLogged = true; log("Audio conversion failed: \(err.localizedDescription)") }
+            return
+        }
+        if out.frameLength > 0 { req.append(out) }
     }
 
     // MARK: Recognition
@@ -188,7 +209,8 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         req.shouldReportPartialResults = true
         if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
         if #available(macOS 13.0, *) { req.addsPunctuation = true }
-        req.contextualStrings = ["Watson", "Claude", "ChatGPT", "Grok", "Spotify", "Cowork"]
+        req.contextualStrings = ["Watson", "Claude", "ChatGPT", "Grok", "Gemini", "Spotify", "Cowork"]
+        try ensureEngine()
         session += 1
         let sid = session
         lastText = ""
@@ -200,7 +222,6 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
             let message = error?.localizedDescription
             DispatchQueue.main.async { self?.onResult(sid, text: text, isFinal: isFinal, error: message) }
         }
-        try ensureEngine()
         listening = true
         isListening.set(true)
         endpointTimer?.invalidate()
@@ -285,7 +306,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
             queue.removeAll()
             return
         }
-        if !player.isPlaying { player.play() }
+        if engine.isRunning && !player.isPlaying { player.play() }
         spokenText += " " + item.text
         let utterance = AVSpeechUtterance(string: item.text)
         utterance.voice = selectedVoice()
@@ -371,7 +392,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     func voices() -> [[String: Any]] {
-        AVSpeechSynthesisVoice.speechVoices().map { v in
+        AVSpeechSynthesisVoice.speechVoices().map { v -> [String: Any] in
             let quality: String
             switch v.quality {
             case .premium: quality = "premium"
@@ -402,27 +423,39 @@ enum AX {
         let el = AXUIElementCreateApplication(app.processIdentifier)
         // Electron and Chromium apps only build their accessibility tree when asked.
         AXUIElementSetAttributeValue(el, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+        if isBrowser(bundleId) {
+            AXUIElementSetAttributeValue(el, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+        }
         return (app, el)
+    }
+
+    static func isBrowser(_ bundleId: String) -> Bool {
+        ["com.google.Chrome", "com.brave.Browser", "company.thebrowser.Browser", "com.microsoft.edgemac", "com.vivaldi.Vivaldi", "com.operasoftware.Opera"]
+            .contains(bundleId)
+    }
+
+    static func windows(_ app: AXUIElement) -> [AXUIElement] {
+        var list = (attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []
+        if list.isEmpty, let w = attr(app, kAXMainWindowAttribute) { list = [w as! AXUIElement] }
+        return list
     }
 
     static func mainWindow(_ app: AXUIElement) -> AXUIElement? {
         if let w = attr(app, kAXMainWindowAttribute) { return (w as! AXUIElement) }
         if let w = attr(app, kAXFocusedWindowAttribute) { return (w as! AXUIElement) }
-        let windows = (attr(app, kAXWindowsAttribute) as? [AXUIElement]) ?? []
-        return windows.first
+        return windows(app).first
     }
 
     static let inlineRoles: Set<String> = ["AXStaticText", "AXLink", "AXImage"]
 
     /// Visible text of a window as lines, plus whether a "Stop" button suggests the app is still generating.
-    static func snapshot(_ window: AXUIElement) -> (lines: [String], busy: Bool) {
+    static func snapshot(_ window: AXUIElement, deadline: Date) -> (lines: [String], busy: Bool) {
         var busy = false
         var visited = 0
-        let deadline = Date().addingTimeInterval(2.5)
 
         func walk(_ el: AXUIElement, depth: Int) -> [String] {
             visited += 1
-            if visited > 40_000 || depth > 80 || Date() > deadline { return [] }
+            if visited > 40_000 || depth > 90 || Date() > deadline { return [] }
             let role = string(el, kAXRoleAttribute) ?? ""
             if role == "AXButton" {
                 let label = [string(el, kAXDescriptionAttribute), string(el, kAXTitleAttribute), string(el, kAXHelpAttribute)]
@@ -430,8 +463,8 @@ enum AX {
                 if label.contains("stop") { busy = true }
                 return []
             }
-            if role == "AXTextArea" || role == "AXTextField" || role == "AXSearchField" {
-                return [] // skip input boxes
+            if role == "AXTextArea" || role == "AXTextField" || role == "AXSearchField" || role == "AXToolbar" || role == "AXTabGroup" {
+                return [] // skip input boxes and browser chrome
             }
             if role == "AXStaticText" {
                 let v = (string(el, kAXValueAttribute) ?? string(el, kAXTitleAttribute) ?? "")
@@ -458,11 +491,12 @@ enum AX {
         var visited = 0
         func walk(_ el: AXUIElement, depth: Int) {
             visited += 1
-            if visited > 40_000 || depth > 80 { return }
+            if visited > 40_000 || depth > 90 { return }
             let role = string(el, kAXRoleAttribute) ?? ""
             if role == "AXTextArea" || (role == "AXTextField" && string(el, kAXSubroleAttribute) != "AXSearchField") {
                 found = el // keep the last one: chat boxes sit at the bottom
             }
+            if role == "AXToolbar" || role == "AXTabGroup" { return } // not the browser's address bar
             for kid in children(el) { walk(kid, depth: depth + 1) }
         }
         walk(window, depth: 0)
@@ -479,41 +513,42 @@ enum AX {
         up?.post(tap: .cghidEventTap)
     }
 
-    static func frontmostBundleId() -> String? {
-        var id: String?
-        DispatchQueue.main.sync { id = NSWorkspace.shared.frontmostApplication?.bundleIdentifier }
-        return id
+    static func frontmost() -> (bundleId: String, name: String)? {
+        var result: (bundleId: String, name: String)?
+        let read = {
+            if let app = NSWorkspace.shared.frontmostApplication, let b = app.bundleIdentifier {
+                result = (b, app.localizedName ?? b)
+            }
+        }
+        if Thread.isMainThread { read() } else { DispatchQueue.main.sync(execute: read) }
+        return result
     }
 
-    static func open(bundleId: String) {
+    static func defaultBrowser() -> String? {
+        guard let url = NSWorkspace.shared.urlForApplication(toOpen: URL(string: "https://example.com")!) else { return nil }
+        return Bundle(url: url)?.bundleIdentifier
+    }
+
+    static func run(_ path: String, _ args: [String]) {
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        p.arguments = ["-b", bundleId]
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = args
         try? p.run()
         p.waitUntilExit()
     }
 
-    /// Bring an app forward, focus its message box, paste the text and (optionally) press Return.
-    static func sendPrompt(bundleId: String, text: String, submit: Bool, returnFocus: Bool) throws {
-        guard AXIsProcessTrusted() else {
-            throw NSError(domain: "watson", code: 10, userInfo: [NSLocalizedDescriptionKey: "Watson needs Accessibility permission to type into other apps."])
-        }
-        let previous = frontmostBundleId()
-        open(bundleId: bundleId)
+    static func waitFront(_ bundleId: String, seconds: Double) throws {
         let start = Date()
-        while frontmostBundleId() != bundleId {
-            if Date().timeIntervalSince(start) > 12 {
+        while frontmost()?.bundleId != bundleId {
+            if Date().timeIntervalSince(start) > seconds {
                 throw NSError(domain: "watson", code: 11, userInfo: [NSLocalizedDescriptionKey: "Couldn't bring \(bundleId) to the front."])
             }
             usleep(100_000)
         }
-        usleep(700_000)
-        if let pair = appElement(bundleId), let window = mainWindow(pair.1), let input = findInput(window) {
-            AXUIElementSetAttributeValue(input, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-            usleep(150_000)
-        }
+    }
 
-        // Paste through the clipboard, then put the user's clipboard back.
+    /// Paste through the clipboard, then put the user's clipboard back.
+    static func paste(_ text: String) {
         let pb = NSPasteboard.general
         var saved: [NSPasteboardItem] = []
         DispatchQueue.main.sync {
@@ -528,20 +563,195 @@ enum AX {
         usleep(80_000)
         key(9, flags: .maskCommand) // Cmd+V
         usleep(450_000)
-        if submit {
-            key(36) // Return
-            usleep(300_000)
-        }
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
             pb.clearContents()
             if !saved.isEmpty { pb.writeObjects(saved) }
         }
-        if returnFocus, let previous, previous != bundleId {
-            usleep(400_000)
-            if let app = NSRunningApplication.runningApplications(withBundleIdentifier: previous).first {
-                DispatchQueue.main.sync { _ = app.activate(options: []) }
-            }
+    }
+
+    static func requireTrust() throws {
+        guard AXIsProcessTrusted() else {
+            throw NSError(domain: "watson", code: 10, userInfo: [NSLocalizedDescriptionKey: "Watson needs Accessibility permission to type into other apps. Turn it on in System Settings → Privacy & Security → Accessibility."])
         }
+    }
+
+    /// Bring an app (or a chat website in the browser) forward, focus its message box,
+    /// paste the text and optionally press Return. Returns the bundle id that received it.
+    static func sendPrompt(bundleId: String?, url: String?, browser: String?, newChat: Bool, text: String, submit: Bool, returnFocus: Bool) throws -> String {
+        try requireTrust()
+        let previous = frontmost()?.bundleId
+        var target: String
+        if let url, !url.isEmpty {
+            guard let b = (browser?.isEmpty == false ? browser : nil) ?? defaultBrowser() else {
+                throw NSError(domain: "watson", code: 12, userInfo: [NSLocalizedDescriptionKey: "Couldn't find your web browser."])
+            }
+            target = b
+            if newChat { run("/usr/bin/open", ["-b", b, url]) } else { run("/usr/bin/open", ["-b", b]) }
+            try waitFront(b, seconds: 12)
+            // Wait for the page's message box to exist (the page may still be loading).
+            let start = Date()
+            var focused = false
+            while Date().timeIntervalSince(start) < (newChat ? 15 : 3) {
+                if let pair = appElement(b), let window = mainWindow(pair.1), let input = findInput(window) {
+                    usleep(newChat ? 900_000 : 150_000) // let the page finish wiring up the box
+                    AXUIElementSetAttributeValue(input, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+                    focused = true
+                    break
+                }
+                usleep(400_000)
+            }
+            if !focused { log("No message box found in \(b); pasting into whatever has focus.") }
+            usleep(200_000)
+        } else if let bundleId, !bundleId.isEmpty {
+            target = bundleId
+            run("/usr/bin/open", ["-b", bundleId])
+            try waitFront(bundleId, seconds: 12)
+            usleep(700_000)
+            if newChat {
+                key(45, flags: .maskCommand) // Cmd+N: new chat in Claude, ChatGPT and most chat apps
+                usleep(900_000)
+            }
+            if let pair = appElement(bundleId), let window = mainWindow(pair.1), let input = findInput(window) {
+                AXUIElementSetAttributeValue(input, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+                usleep(150_000)
+            }
+        } else {
+            throw NSError(domain: "watson", code: 13, userInfo: [NSLocalizedDescriptionKey: "That agent has no app or website set."])
+        }
+
+        paste(text)
+        if submit {
+            key(36) // Return
+            usleep(300_000)
+        }
+        if returnFocus, let previous, previous != target {
+            usleep(400_000)
+            run("/usr/bin/open", ["-b", previous])
+        }
+        return target
+    }
+
+    /// Dictation: type text into the app the user was in (no Return).
+    static func insert(bundleId: String, text: String) throws {
+        try requireTrust()
+        run("/usr/bin/open", ["-b", bundleId])
+        try waitFront(bundleId, seconds: 6)
+        usleep(250_000)
+        paste(text)
+    }
+}
+
+// MARK: - Calendar and Reminders (EventKit)
+
+let eventStore = EKEventStore()
+
+enum Apple {
+    static func hex(_ cg: CGColor?) -> String {
+        guard let cg, let c = NSColor(cgColor: cg)?.usingColorSpace(.sRGB) else { return "#0A84FF" }
+        return String(format: "#%02X%02X%02X", Int(c.redComponent * 255), Int(c.greenComponent * 255), Int(c.blueComponent * 255))
+    }
+
+    static func status(_ type: EKEntityType) -> String {
+        let s = EKEventStore.authorizationStatus(for: type)
+        if #available(macOS 14.0, *) {
+            if s == .fullAccess { return "granted" }
+            if s == .writeOnly { return "writeOnly" }
+        }
+        switch s {
+        case .authorized: return "granted"
+        case .denied: return "denied"
+        case .restricted: return "restricted"
+        default: return "unknown"
+        }
+    }
+
+    static func access(_ type: EKEntityType, _ done: @escaping (Bool) -> Void) {
+        if status(type) == "granted" { return done(true) }
+        let finish: (Bool, Error?) -> Void = { granted, _ in DispatchQueue.main.async { done(granted) } }
+        if #available(macOS 14.0, *) {
+            if type == .event { eventStore.requestFullAccessToEvents(completion: finish) }
+            else { eventStore.requestFullAccessToReminders(completion: finish) }
+        } else {
+            eventStore.requestAccess(to: type, completion: finish)
+        }
+    }
+
+    static func events(from: Date, to: Date) -> [[String: Any]] {
+        let pred = eventStore.predicateForEvents(withStart: from, end: to, calendars: nil)
+        return eventStore.events(matching: pred)
+            .sorted { $0.startDate < $1.startDate }
+            .prefix(60)
+            .map { e -> [String: Any] in
+                var o: [String: Any] = [
+                    "title": e.title ?? "Untitled",
+                    "start": e.startDate.timeIntervalSince1970,
+                    "end": e.endDate.timeIntervalSince1970,
+                    "allDay": e.isAllDay,
+                    "calendar": e.calendar.title,
+                    "color": hex(e.calendar.cgColor),
+                ]
+                if let l = e.location, !l.isEmpty { o["location"] = l }
+                return o
+            }
+    }
+
+    static func addEvent(title: String, start: Date, end: Date, allDay: Bool, location: String?, notes: String?) throws -> [String: Any] {
+        let e = EKEvent(eventStore: eventStore)
+        e.title = title
+        e.startDate = start
+        e.endDate = end
+        e.isAllDay = allDay
+        e.location = location
+        e.notes = notes
+        e.calendar = eventStore.defaultCalendarForNewEvents
+        try eventStore.save(e, span: .thisEvent, commit: true)
+        return ["title": title, "start": start.timeIntervalSince1970, "end": end.timeIntervalSince1970, "allDay": allDay, "calendar": e.calendar?.title ?? "", "color": hex(e.calendar?.cgColor)]
+    }
+
+    static func reminders(list: String?, _ done: @escaping ([[String: Any]]) -> Void) {
+        var calendars: [EKCalendar]?
+        if let list, !list.isEmpty {
+            calendars = eventStore.calendars(for: .reminder).filter { $0.title.localizedCaseInsensitiveContains(list) }
+            if calendars?.isEmpty == true { calendars = nil }
+        }
+        let pred = eventStore.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: calendars)
+        eventStore.fetchReminders(matching: pred) { found in
+            let items = (found ?? [])
+                .sorted { a, b in
+                    let da = a.dueDateComponents.flatMap { Calendar.current.date(from: $0) } ?? .distantFuture
+                    let db = b.dueDateComponents.flatMap { Calendar.current.date(from: $0) } ?? .distantFuture
+                    return da < db
+                }
+                .prefix(40)
+                .map { r -> [String: Any] in
+                    var o: [String: Any] = [
+                        "id": r.calendarItemIdentifier,
+                        "title": r.title ?? "",
+                        "list": r.calendar.title,
+                        "color": hex(r.calendar.cgColor),
+                        "priority": r.priority,
+                    ]
+                    if let d = r.dueDateComponents.flatMap({ Calendar.current.date(from: $0) }) { o["due"] = d.timeIntervalSince1970 }
+                    return o
+                }
+            DispatchQueue.main.async { done(Array(items)) }
+        }
+    }
+
+    static func addReminder(title: String, due: Date?, list: String?) throws -> [String: Any] {
+        let r = EKReminder(eventStore: eventStore)
+        r.title = title
+        var cal = eventStore.defaultCalendarForNewReminders()
+        if let list, !list.isEmpty, let match = eventStore.calendars(for: .reminder).first(where: { $0.title.localizedCaseInsensitiveContains(list) }) {
+            cal = match
+        }
+        r.calendar = cal
+        if let due {
+            r.dueDateComponents = Calendar.current.dateComponents([.year, .month, .day, .hour, .minute], from: due)
+            r.addAlarm(EKAlarm(absoluteDate: due))
+        }
+        try eventStore.save(r, commit: true)
+        return ["title": title, "list": cal?.title ?? "Reminders"]
     }
 }
 
@@ -569,7 +779,18 @@ func speechStatus() -> String {
 }
 
 func permissions() -> [String: Any] {
-    ["microphone": micStatus(), "speech": speechStatus(), "accessibility": AXIsProcessTrusted()]
+    [
+        "microphone": micStatus(),
+        "speech": speechStatus(),
+        "accessibility": AXIsProcessTrusted(),
+        "calendar": Apple.status(.event),
+        "reminders": Apple.status(.reminder),
+    ]
+}
+
+func date(_ v: Any?) -> Date? {
+    guard let n = v as? Double else { return nil }
+    return Date(timeIntervalSince1970: n)
 }
 
 func handle(_ msg: [String: Any]) {
@@ -606,7 +827,11 @@ func handle(_ msg: [String: Any]) {
         _ = AXIsProcessTrustedWithOptions(options)
         AVCaptureDevice.requestAccess(for: .audio) { _ in
             SFSpeechRecognizer.requestAuthorization { _ in
-                DispatchQueue.main.async { reply(id, data: permissions()) }
+                DispatchQueue.main.async {
+                    Apple.access(.event) { _ in
+                        Apple.access(.reminder) { _ in reply(id, data: permissions()) }
+                    }
+                }
             }
         }
     case "apps.running":
@@ -620,23 +845,69 @@ func handle(_ msg: [String: Any]) {
     case "apps.installed":
         let ids = msg["bundleIds"] as? [String] ?? []
         reply(id, data: ids.filter { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0) != nil })
+    case "frontmost":
+        if let f = AX.frontmost() { reply(id, data: ["bundleId": f.bundleId, "name": f.name]) } else { reply(id, data: [String: String]()) }
+    case "browser.default":
+        reply(id, data: ["bundleId": AX.defaultBrowser() ?? ""])
     case "ax.snapshot":
         let bundleId = msg["bundleId"] as? String ?? ""
         axQueue.async {
             guard AXIsProcessTrusted() else { reply(id, ok: false, error: "Accessibility permission is off."); return }
-            guard let pair = AX.appElement(bundleId), let window = AX.mainWindow(pair.1) else {
-                reply(id, ok: false, error: "That app isn't open."); return
+            guard let pair = AX.appElement(bundleId) else { reply(id, ok: false, error: "That app isn't open."); return }
+            let deadline = Date().addingTimeInterval(3.5)
+            let wins = AX.windows(pair.1).prefix(4).map { w -> [String: Any] in
+                let snap = AX.snapshot(w, deadline: deadline)
+                return ["title": AX.string(w, kAXTitleAttribute) ?? "", "lines": snap.lines, "busy": snap.busy]
             }
-            let snap = AX.snapshot(window)
-            reply(id, data: ["lines": snap.lines, "busy": snap.busy])
+            reply(id, data: ["windows": Array(wins)])
         }
     case "ax.send":
+        let text = msg["text"] as? String ?? ""
+        axQueue.async {
+            do {
+                let target = try AX.sendPrompt(
+                    bundleId: msg["bundleId"] as? String,
+                    url: msg["url"] as? String,
+                    browser: msg["browser"] as? String,
+                    newChat: msg["newChat"] as? Bool ?? false,
+                    text: text,
+                    submit: msg["submit"] as? Bool ?? true,
+                    returnFocus: msg["returnFocus"] as? Bool ?? true)
+                reply(id, data: ["bundleId": target])
+            } catch { reply(id, ok: false, error: error.localizedDescription) }
+        }
+    case "ax.insert":
         let bundleId = msg["bundleId"] as? String ?? ""
         let text = msg["text"] as? String ?? ""
-        let submit = msg["submit"] as? Bool ?? true
-        let returnFocus = msg["returnFocus"] as? Bool ?? true
         axQueue.async {
-            do { try AX.sendPrompt(bundleId: bundleId, text: text, submit: submit, returnFocus: returnFocus); reply(id) }
+            do { try AX.insert(bundleId: bundleId, text: text); reply(id) }
+            catch { reply(id, ok: false, error: error.localizedDescription) }
+        }
+    case "calendar.events":
+        Apple.access(.event) { granted in
+            guard granted else { reply(id, ok: false, error: "Watson doesn't have access to Calendar. Allow it in System Settings → Privacy & Security → Calendars."); return }
+            let from = date(msg["from"]) ?? Calendar.current.startOfDay(for: Date())
+            let to = date(msg["to"]) ?? from.addingTimeInterval(86_400)
+            reply(id, data: Apple.events(from: from, to: to))
+        }
+    case "calendar.add":
+        Apple.access(.event) { granted in
+            guard granted else { reply(id, ok: false, error: "Watson doesn't have access to Calendar."); return }
+            guard let start = date(msg["start"]) else { reply(id, ok: false, error: "Missing start time."); return }
+            let end = date(msg["end"]) ?? start.addingTimeInterval(3600)
+            do {
+                reply(id, data: try Apple.addEvent(title: msg["title"] as? String ?? "New event", start: start, end: end, allDay: msg["allDay"] as? Bool ?? false, location: msg["location"] as? String, notes: msg["notes"] as? String))
+            } catch { reply(id, ok: false, error: error.localizedDescription) }
+        }
+    case "reminders.list":
+        Apple.access(.reminder) { granted in
+            guard granted else { reply(id, ok: false, error: "Watson doesn't have access to Reminders. Allow it in System Settings → Privacy & Security → Reminders."); return }
+            Apple.reminders(list: msg["list"] as? String) { reply(id, data: $0) }
+        }
+    case "reminders.add":
+        Apple.access(.reminder) { granted in
+            guard granted else { reply(id, ok: false, error: "Watson doesn't have access to Reminders."); return }
+            do { reply(id, data: try Apple.addReminder(title: msg["title"] as? String ?? "", due: date(msg["due"]), list: msg["list"] as? String)) }
             catch { reply(id, ok: false, error: error.localizedDescription) }
         }
     case "ping":

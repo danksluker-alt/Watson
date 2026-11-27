@@ -1,0 +1,30 @@
+// Every shell command Watson runs on macOS (osascript, pmset) goes through here.
+// Tests replace it with a bridge to the fake helper (WATSON_FAKE_OS=1).
+import { execFile } from 'node:child_process'
+
+type Exec = (cmd: string, args: string[], timeoutMs: number) => Promise<string>
+
+const real: Exec = (cmd, args, timeoutMs) =>
+  new Promise((resolve, reject) => {
+    execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err) reject(new Error((stderr || err.message).trim()))
+      else resolve(stdout.trim())
+    })
+  })
+
+let exec: Exec = real
+
+export function setExecBridge(bridge: Exec) {
+  exec = bridge
+}
+
+export const runOs = (cmd: string, args: string[], timeoutMs = 8000) => exec(cmd, args, timeoutMs)
+
+export const osascript = (script: string, timeoutMs = 10_000) => runOs('/usr/bin/osascript', ['-e', script], timeoutMs)
+
+/** Quote a string for AppleScript. */
+export const asString = (s: string) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+
+/** Field and record separators that can't appear in normal text. */
+export const FS = '\u001f'
+export const RS = '\u001e'

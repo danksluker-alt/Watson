@@ -29,3 +29,17 @@ test('falls back to new lines when the prompt is not visible', () => {
 test('nothing yet', () => {
   assert.equal(extractReply([], [prompt], prompt), '')
 })
+
+import { replyFromWindows } from '../src/main/extract.ts'
+
+test('picks the browser window that holds the conversation', () => {
+  const before = [{ title: 'Inbox', lines: ['Inbox', 'Mail from Sam'], busy: false }]
+  const after = [
+    { title: 'Inbox', lines: ['Inbox', 'Mail from Sam', 'Mail from Ana'], busy: false },
+    { title: 'Grok', lines: ['Grok', 'What is 2+2 in binary?', '2 + 2 = 4, which is 100 in binary.', 'Stop'], busy: true },
+  ]
+  const r = replyFromWindows(before, after, 'What is 2+2 in binary?')
+  assert.equal(r.found, true)
+  assert.equal(r.busy, true)
+  assert.equal(r.reply, '2 + 2 = 4, which is 100 in binary.')
+})

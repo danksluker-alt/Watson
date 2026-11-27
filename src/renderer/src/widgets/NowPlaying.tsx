@@ -18,8 +18,12 @@ export function NowPlayingWidget({ data }: { data: NowPlayingData }) {
     <div className="now-playing">
       {data.artworkUrl && <img className="np-backdrop" src={data.artworkUrl} alt="" />}
       <div className="np-body">
-        {data.artworkUrl ? <img className="np-art" src={data.artworkUrl} alt="" /> : <div className="np-art np-art-empty" />}
+        {data.artworkUrl ? <img className="np-art" src={data.artworkUrl} alt="" /> : <div className={`np-art np-art-empty ${data.app}`} />}
         <div className="np-info">
+          <div className="np-source" data-app={data.app}>
+            <span className="np-source-dot" />
+            {data.app === 'music' ? 'Music' : 'Spotify'}
+          </div>
           <div className="np-title">{data.title}</div>
           <div className="np-artist">{data.artist}</div>
           <div className="np-progress">
@@ -31,13 +35,13 @@ export function NowPlayingWidget({ data }: { data: NowPlayingData }) {
           </div>
         </div>
         <div className="np-controls">
-          <button onClick={() => window.watson.spotify('previous')} aria-label="Previous">
+          <button onClick={() => window.watson.music(data.app, 'previous')} aria-label="Previous">
             <Prev size={20} />
           </button>
-          <button className="np-main" onClick={() => window.watson.spotify('playpause')} aria-label={data.state === 'playing' ? 'Pause' : 'Play'}>
+          <button className="np-main" onClick={() => window.watson.music(data.app, 'playpause')} aria-label={data.state === 'playing' ? 'Pause' : 'Play'}>
             {data.state === 'playing' ? <Pause size={24} /> : <Play size={24} />}
           </button>
-          <button onClick={() => window.watson.spotify('next')} aria-label="Next">
+          <button onClick={() => window.watson.music(data.app, 'next')} aria-label="Next">
             <Next size={20} />
           </button>
         </div>

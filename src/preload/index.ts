@@ -7,6 +7,7 @@ const api: WatsonAPI = {
     ipcRenderer.on('state', h)
     return () => ipcRenderer.removeListener('state', h)
   },
+  getState: () => ipcRenderer.invoke('ui:getState'),
   onLevel: (cb) => {
     const h = (_: unknown, v: number) => cb(v)
     ipcRenderer.on('level', h)
@@ -20,7 +21,20 @@ const api: WatsonAPI = {
   dismiss: () => ipcRenderer.send('ui:dismiss'),
   answerConfirm: (id, ok) => ipcRenderer.send('ui:confirm', id, ok),
   stockRange: (symbol, range) => ipcRenderer.send('widget:stockRange', symbol, range),
-  spotify: (action) => ipcRenderer.send('widget:spotify', action),
+  music: (app, action) => ipcRenderer.send('widget:music', app, action),
+  setCapture: (mode) => ipcRenderer.send('ui:setCapture', mode),
+  dictate: (text) => ipcRenderer.send('ui:dictate', text),
+  submitDraft: (text, target) => ipcRenderer.send('ui:submitDraft', text, target),
+  cancelDraft: () => ipcRenderer.send('ui:cancelDraft'),
+  pin: (block) => ipcRenderer.send('ui:pin', block),
+  onWidget: (cb) => {
+    const h = (_: unknown, m: Parameters<typeof cb>[0]) => cb(m)
+    ipcRenderer.on('widget', h)
+    return () => ipcRenderer.removeListener('widget', h)
+  },
+  widgetReady: (id) => ipcRenderer.send('widget:ready', id),
+  widgetSize: (id, w, h) => ipcRenderer.send('widget:size', id, w, h),
+  closeWidget: (id) => ipcRenderer.send('widget:close', id),
   openSettings: () => ipcRenderer.send('ui:openSettings'),
   openExternal: (url) => ipcRenderer.send('ui:openExternal', url),
   getSettings: () => ipcRenderer.invoke('settings:get'),

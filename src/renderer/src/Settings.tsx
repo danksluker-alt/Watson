@@ -4,6 +4,38 @@ import type { AgentTarget, PermissionStatus, RunningApp, SecretName, SecretStatu
 import { Check, Warning } from './components/Icons'
 import { Orb } from './components/Orb'
 
+function AddWebsite({ onAdd }: { onAdd: (name: string, url: string) => void }) {
+  const [name, setName] = useState('')
+  const [url, setUrl] = useState('')
+  const ok = name.trim() && /^https?:\/\/\S+\.\S+/.test(url.trim())
+  return (
+    <form
+      className="secret"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!ok) return
+        onAdd(name.trim(), url.trim())
+        setName('')
+        setUrl('')
+      }}
+    >
+      <input className="text narrow-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" />
+      <input className="text" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
+      <button className="btn small primary" disabled={!ok}>
+        Add
+      </button>
+    </form>
+  )
+}
+
+const host = (u?: string) => {
+  try {
+    return u ? new URL(u).hostname.replace(/^www\./, '') : ''
+  } catch {
+    return u ?? ''
+  }
+}
+
 const KNOWN_AGENTS: Record<string, string> = {
   'com.anthropic.claudefordesktop': 'Claude',
   'com.openai.chat': 'ChatGPT',
@@ -167,8 +199,24 @@ export function SettingsPage() {
           </>
         }
       >
-        <Row label="Shortcut" hint="e.g. Alt+Space, Command+Shift+Space">
+        <Row label="Talk shortcut" hint="e.g. Alt+Space, Command+Shift+Space">
           <input className="text" defaultValue={s.hotkey} onBlur={(e) => e.target.value.trim() && save({ hotkey: e.target.value.trim() })} />
+        </Row>
+        <Row label="Dictate & review shortcut" hint="Your words appear in the pill to edit before sending">
+          <input className="text" defaultValue={s.reviewHotkey} onBlur={(e) => e.target.value.trim() && save({ reviewHotkey: e.target.value.trim() })} />
+        </Row>
+        <Row label="When I use the talk shortcut" hint={s.inputMode === 'live' ? 'Watson answers as soon as you stop talking' : 'You see and edit your words first'}>
+          <div className="segmented light">
+            <button className={s.inputMode === 'live' ? 'on' : ''} onClick={() => save({ inputMode: 'live' })}>
+              Answer live
+            </button>
+            <button className={s.inputMode === 'review' ? 'on' : ''} onClick={() => save({ inputMode: 'review' })}>
+              Let me review
+            </button>
+          </div>
+        </Row>
+        <Row label="Sounds" hint="Soft chimes when Watson listens and answers">
+          <Toggle on={s.sounds} onChange={(v) => save({ sounds: v })} />
         </Row>
         <Row label="Voice">
           <select value={s.voiceId} onChange={(e) => save({ voiceId: e.target.value })}>
@@ -203,10 +251,10 @@ export function SettingsPage() {
 
       <Group
         title="Agents"
-        footer="Watson types into these apps for you when a request needs them: coding, your website, email, calendar or anything using their connectors. Their answers come back as a short spoken summary. Watson asks before sending anything that sends, deletes, buys or publishes."
+        footer="Watson types into these for you when a request needs them, or when you name one (“ask Grok…”): coding, your website, email, anything using their connectors. Websites open in your default browser, signed in as you. Answers come back as a short spoken summary. Watson asks before anything that sends, deletes, buys or publishes."
       >
         {s.agents.map((a) => (
-          <Row key={a.id} label={a.name} hint={a.bundleId}>
+          <Row key={a.id} label={a.name} hint={a.kind === 'web' ? `Website · ${host(a.url)}` : `Mac app · ${a.bundleId}`}>
             {s.defaultAgent === a.id ? (
               <span className="tag">Default</span>
             ) : (
@@ -224,7 +272,7 @@ export function SettingsPage() {
               const app = apps.find((x) => x.bundleId === e.target.value)
               if (!app) return
               const id = app.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-              void save({ agents: [...s.agents, { id, name: KNOWN_AGENTS[app.bundleId] ?? app.name, bundleId: app.bundleId, enabled: true }] })
+              void save({ agents: [...s.agents, { id, name: KNOWN_AGENTS[app.bundleId] ?? app.name, kind: 'app', bundleId: app.bundleId, enabled: true }] })
             }}
             onFocus={() => void window.watson.runningApps().then(setApps)}
           >
@@ -235,6 +283,14 @@ export function SettingsPage() {
               </option>
             ))}
           </select>
+        </Row>
+        <Row label="Add a chat website" hint="Any AI you use in the browser">
+          <AddWebsite
+            onAdd={(name, url) => {
+              const id = `${name.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-web`
+              void save({ agents: [...s.agents.filter((a) => a.id !== id), { id, name, kind: 'web', url, enabled: true }] })
+            }}
+          />
         </Row>
         <Row label="Ask before every hand-off">
           <Toggle on={s.confirmHandoffs} onChange={(v) => save({ confirmHandoffs: v })} />
@@ -253,6 +309,16 @@ export function SettingsPage() {
           </>
         }
       >
+        <Row label="Music app">
+          <div className="segmented light">
+            <button className={s.musicApp === 'spotify' ? 'on' : ''} onClick={() => save({ musicApp: 'spotify' })}>
+              Spotify
+            </button>
+            <button className={s.musicApp === 'music' ? 'on' : ''} onClick={() => save({ musicApp: 'music' })}>
+              Apple Music
+            </button>
+          </div>
+        </Row>
         <Row label="Home city">
           <input className="text" defaultValue={s.homeCity} onBlur={(e) => e.target.value.trim() && save({ homeCity: e.target.value.trim() })} />
         </Row>
@@ -275,13 +341,15 @@ export function SettingsPage() {
 
       <Group
         title="Permissions"
-        footer="Microphone and Speech Recognition are for listening (recognition runs on this Mac). Accessibility lets Watson type into your AI apps and read their answers. macOS asks about Automation the first time Watson controls Spotify or another app."
+        footer="Microphone and Speech Recognition are for listening (recognition runs on this Mac). Accessibility lets Watson type into your AI apps and read their answers. Calendars and Reminders power those widgets. macOS asks about Automation the first time Watson uses Spotify, Music or Notes."
       >
         {perm ? (
           <>
             <PermissionRow label="Microphone" state={perm.microphone} pane="Microphone" />
             <PermissionRow label="Speech Recognition" state={perm.speech} pane="SpeechRecognition" />
             <PermissionRow label="Accessibility" state={perm.accessibility} pane="Accessibility" />
+            <PermissionRow label="Calendars" state={perm.calendar} pane="Calendars" />
+            <PermissionRow label="Reminders" state={perm.reminders} pane="Reminders" />
             <Row label="Ask for missing permissions">
               <button className="btn small" onClick={() => void window.watson.requestPermissions().then(setPerm)}>
                 Request

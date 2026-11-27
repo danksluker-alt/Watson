@@ -10,11 +10,13 @@ const RANGES: Record<StockRange, { range: string; interval: string }> = {
   '1Y': { range: '1y', interval: '1wk' },
 }
 
+const YAHOO = process.env.WATSON_MOCK_DATA ?? 'https://query1.finance.yahoo.com'
+
 const UA = { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15' }
 
 async function fromYahoo(symbol: string, range: StockRange): Promise<StockData> {
   const r = RANGES[range]
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?range=${r.range}&interval=${r.interval}&includePrePost=false`
+  const url = `${YAHOO}/v8/finance/chart/${encodeURIComponent(symbol)}?range=${r.range}&interval=${r.interval}&includePrePost=false`
   const res = await fetch(url, { headers: UA })
   if (!res.ok) throw new Error(`Yahoo ${res.status}`)
   const j = (await res.json()) as {

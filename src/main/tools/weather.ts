@@ -2,10 +2,14 @@
 import type { WeatherData } from '@shared/types'
 import { skyLabel } from '@shared/weather'
 
-type Geo = { name: string; admin1?: string; country_code?: string; latitude: number; longitude: number }
+// WATSON_MOCK_DATA points every data source at a local mock server (tests only).
+const GEO = process.env.WATSON_MOCK_DATA ?? 'https://geocoding-api.open-meteo.com'
+const METEO = process.env.WATSON_MOCK_DATA ?? 'https://api.open-meteo.com'
 
-async function geocode(place: string): Promise<Geo> {
-  const url = `https://geocoding-api.open-meteo.com/v1/search?count=1&language=en&format=json&name=${encodeURIComponent(place)}`
+type Geo = { name: string; admin1?: string; country_code?: string; latitude: number; longitude: number; timezone?: string }
+
+export async function geocode(place: string): Promise<Geo> {
+  const url = `${GEO}/v1/search?count=1&language=en&format=json&name=${encodeURIComponent(place)}`
   const res = await fetch(url)
   if (!res.ok) throw new Error(`Couldn't look up "${place}".`)
   const json = (await res.json()) as { results?: Geo[] }
@@ -35,7 +39,7 @@ export async function getWeather(place: string, unit: 'C' | 'F'): Promise<Weathe
     temperature_unit: unit === 'F' ? 'fahrenheit' : 'celsius',
     wind_speed_unit: unit === 'F' ? 'mph' : 'kmh',
   })
-  const res = await fetch(`https://api.open-meteo.com/v1/forecast?${params}`)
+  const res = await fetch(`${METEO}/v1/forecast?${params}`)
   if (!res.ok) throw new Error('The weather service is not answering right now.')
   const j = (await res.json()) as {
     current: { time: string; temperature_2m: number; apparent_temperature: number; weather_code: number; wind_speed_10m: number; relative_humidity_2m: number; is_day: number }

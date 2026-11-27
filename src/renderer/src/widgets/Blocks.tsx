@@ -1,5 +1,7 @@
 import { motion } from 'motion/react'
-import type { Block } from '@shared/types'
+import { PINNABLE, type Block } from '@shared/types'
+import { Pin } from '../components/Icons'
+import { BatteryWidget, CalendarWidget, ClockWidget, NotesWidget, RemindersWidget } from './Apple'
 import { BarChart, LineChart } from '../components/Charts'
 import { Markdown } from '../components/Markdown'
 import { DelegationCard } from './Delegation'
@@ -7,7 +9,7 @@ import { NowPlayingWidget } from './NowPlaying'
 import { StockWidget } from './Stock'
 import { WeatherWidget } from './Weather'
 
-function BlockView({ block }: { block: Block }) {
+export function BlockView({ block }: { block: Block }) {
   switch (block.type) {
     case 'text':
       return (
@@ -98,6 +100,16 @@ function BlockView({ block }: { block: Block }) {
       return <NowPlayingWidget data={block.data} />
     case 'delegation':
       return <DelegationCard data={block.data} />
+    case 'calendar':
+      return <CalendarWidget data={block.data} />
+    case 'reminders':
+      return <RemindersWidget data={block.data} />
+    case 'notes':
+      return <NotesWidget data={block.data} />
+    case 'clock':
+      return <ClockWidget data={block.data} />
+    case 'battery':
+      return <BatteryWidget data={block.data} />
   }
 }
 
@@ -110,8 +122,14 @@ export function Blocks({ blocks }: { blocks: Block[] }) {
           initial={{ opacity: 0, y: 10, scale: 0.98 }}
           animate={{ opacity: 1, y: 0, scale: 1 }}
           transition={{ type: 'spring', stiffness: 380, damping: 30, delay: i * 0.05 }}
+          className={PINNABLE.includes(b.type) ? 'pinnable' : undefined}
         >
           <BlockView block={b} />
+          {PINNABLE.includes(b.type) && (
+            <button className="pin-btn" onClick={() => window.watson.pin(b)} title="Pin to screen" aria-label="Pin to screen">
+              <Pin size={13} />
+            </button>
+          )}
         </motion.div>
       ))}
     </div>

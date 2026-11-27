@@ -17,6 +17,12 @@ export class Store extends EventEmitter {
     helperReady: false,
     hasApiKey: false,
     usageTodayUsd: 0,
+    capture: 'live',
+    draft: null,
+    insertTarget: null,
+    insertTargetName: null,
+    agents: [],
+    sounds: true,
   }
 
   set(patch: Partial<UIState>) {
@@ -31,6 +37,10 @@ export class Store extends EventEmitter {
     const list: Activity[] = [...this.state.activity.slice(-3), { id, text, status: 'running' }]
     this.set({ activity: list })
     return id
+  }
+
+  removeActivity(id: string) {
+    this.set({ activity: this.state.activity.filter((a) => a.id !== id) })
   }
 
   finishActivity(id: string, status: Activity['status'] = 'done', text?: string) {

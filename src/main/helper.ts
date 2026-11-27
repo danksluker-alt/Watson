@@ -34,8 +34,14 @@ export class Helper extends EventEmitter {
       : path.join(app.getAppPath(), 'helper', 'build', 'watson-helper')
   }
 
+  /** Tests and development can swap in another helper, e.g. WATSON_HELPER_CMD="node tests/fake-helper.mjs". */
+  private static override(): string[] | null {
+    const cmd = process.env.WATSON_HELPER_CMD
+    return cmd ? cmd.split(' ').filter(Boolean) : null
+  }
+
   get available(): boolean {
-    return process.platform === 'darwin' && fs.existsSync(Helper.binaryPath())
+    return Boolean(Helper.override()) || (process.platform === 'darwin' && fs.existsSync(Helper.binaryPath()))
   }
 
   start() {
@@ -43,7 +49,8 @@ export class Helper extends EventEmitter {
       console.warn(`[watson] helper not found at ${Helper.binaryPath()} — run "npm run helper". Voice is off; typing still works.`)
       return
     }
-    const proc = spawn(Helper.binaryPath(), [], { stdio: ['pipe', 'pipe', 'pipe'] })
+    const [bin, ...args] = Helper.override() ?? [Helper.binaryPath()]
+    const proc = spawn(bin, args, { stdio: ['pipe', 'pipe', 'pipe'] })
     this.proc = proc
     proc.stdout.setEncoding('utf8')
     proc.stdout.on('data', (chunk: string) => this.onData(chunk))

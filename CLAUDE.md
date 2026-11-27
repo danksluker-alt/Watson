@@ -10,4 +10,11 @@
   never send screenshots unless asked.
 - Anything that sends, deletes, buys or publishes must go through `confirm()` in `src/main/index.ts`.
 - Keys only via `setSecret`/`getSecret` (safeStorage). Never in code, logs or settings.json.
-- Before committing: `npm run typecheck`, `npm test`, `npm run build`.
+- Agents are `AgentTarget`s: `kind: 'app'` (bundle id) or `kind: 'web'` (chat URL opened in the
+  default browser). Reply reading is `replyFromWindows` in `src/main/extract.ts`.
+- Widgets: `buildWidget`/`paramsOf` in `src/main/widgets.ts` are the single source for panel blocks
+  and pinned widget windows (`src/main/pinned.ts`).
+- Test seams (env): `WATSON_HELPER_CMD`, `WATSON_FAKE_OS`, `WATSON_MOCK_DATA`, `WATSON_USER_DATA`,
+  `WATSON_POLL_MS`, `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`. Used by `tests/e2e/run.mjs`.
+- Before committing: `npm run typecheck`, `npm test`, `npm run build`, and `npm run e2e:linux`
+  (or `npm run e2e` on a Mac) when behaviour changes.

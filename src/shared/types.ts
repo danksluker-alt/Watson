@@ -26,7 +26,10 @@ export type StockData = {
   source: string
 }
 
+export type MusicApp = 'spotify' | 'music'
+
 export type NowPlayingData = {
+  app: MusicApp
   state: 'playing' | 'paused' | 'stopped'
   title: string
   artist: string
@@ -38,8 +41,49 @@ export type NowPlayingData = {
 
 export type DelegationStatus = 'confirming' | 'sending' | 'waiting' | 'reading' | 'done' | 'failed'
 
+export type CalEvent = {
+  title: string
+  start: number
+  end: number
+  allDay: boolean
+  calendar: string
+  color: string
+  location?: string
+}
+
+export type CalendarData = {
+  range: string
+  title: string
+  days: { label: string; date: string; events: CalEvent[] }[]
+  highlight?: string
+}
+
+export type RemindersData = {
+  list?: string
+  title: string
+  items: { id: string; title: string; due?: number; list: string; color: string; priority: number }[]
+  highlight?: string
+}
+
+export type NotesData = {
+  query?: string
+  notes: { id: string; title: string; snippet: string; modified: number; folder: string }[]
+  open?: { title: string; body: string; modified: number }
+}
+
+export type ClockData = { cities: { name: string; timeZone: string }[] }
+
+export type BatteryData = {
+  percent: number | null
+  charging: boolean
+  onAC: boolean
+  state: string
+  timeRemaining?: string
+}
+
 export type DelegationData = {
   jobId: string
+  agentId: string
   agent: string
   prompt: string
   status: DelegationStatus
@@ -64,8 +108,27 @@ export type Block =
   | { type: 'stock'; data: StockData }
   | { type: 'nowPlaying'; data: NowPlayingData }
   | { type: 'delegation'; data: DelegationData }
+  | { type: 'calendar'; data: CalendarData }
+  | { type: 'reminders'; data: RemindersData }
+  | { type: 'notes'; data: NotesData }
+  | { type: 'clock'; data: ClockData }
+  | { type: 'battery'; data: BatteryData }
 
 export type Panel = { title?: string; subtitle?: string; blocks: Block[] }
+
+/** Widgets that can be pinned to a screen. */
+export type WidgetKind = 'weather' | 'stock' | 'calendar' | 'reminders' | 'notes' | 'clock' | 'battery' | 'nowPlaying'
+
+export const PINNABLE: Block['type'][] = ['weather', 'stock', 'calendar', 'reminders', 'notes', 'clock', 'battery', 'nowPlaying']
+
+export type PinnedWidget = {
+  id: string
+  kind: WidgetKind
+  params: Record<string, string>
+  displayId?: number
+  x?: number
+  y?: number
+}
 
 // ---------- UI state pushed from main to the renderer ----------
 
@@ -74,6 +137,11 @@ export type Phase = 'idle' | 'listening' | 'thinking' | 'speaking'
 export type Activity = { id: string; text: string; status: 'running' | 'done' | 'error' }
 
 export type PendingConfirm = { id: string; title: string; body: string; actionLabel: string }
+
+export type InputMode = 'live' | 'review'
+
+/** Words dictated in review mode, waiting for the user to edit and send. */
+export type Draft = { id: number; text: string }
 
 export type UIState = {
   phase: Phase
@@ -89,6 +157,13 @@ export type UIState = {
   helperReady: boolean
   hasApiKey: boolean
   usageTodayUsd: number
+  /** How the current listening session ends: answer right away, or fill the draft. */
+  capture: InputMode
+  draft: Draft | null
+  insertTarget: string | null
+  insertTargetName: string | null
+  agents: { id: string; name: string }[]
+  sounds: boolean
 }
 
 // ---------- Settings ----------
@@ -96,12 +171,21 @@ export type UIState = {
 export type AgentTarget = {
   id: string
   name: string
-  bundleId: string
+  /** 'app': a Mac app such as Claude or ChatGPT. 'web': a chat website opened in your browser. */
+  kind: 'app' | 'web'
+  bundleId?: string
+  url?: string
   enabled: boolean
 }
 
 export type Settings = {
   hotkey: string
+  reviewHotkey: string
+  inputMode: InputMode
+  sounds: boolean
+  musicApp: MusicApp
+  browserBundleId: string
+  pinned: PinnedWidget[]
   homeCity: string
   units: 'C' | 'F'
   speechLocale: string
@@ -126,6 +210,8 @@ export type PermissionStatus = {
   microphone: string
   speech: string
   accessibility: boolean
+  calendar?: string
+  reminders?: string
 }
 
 export type VoiceInfo = { id: string; name: string; language: string; quality: string }
@@ -136,6 +222,7 @@ export type RunningApp = { name: string; bundleId: string }
 
 export type WatsonAPI = {
   onState: (cb: (s: UIState) => void) => () => void
+  getState: () => Promise<UIState>
   onLevel: (cb: (level: number) => void) => () => void
   setInteractive: (interactive: boolean) => void
   focus: () => void
@@ -145,7 +232,16 @@ export type WatsonAPI = {
   dismiss: () => void
   answerConfirm: (id: string, accepted: boolean) => void
   stockRange: (symbol: string, range: StockRange) => void
-  spotify: (action: 'playpause' | 'next' | 'previous') => void
+  music: (app: MusicApp, action: 'playpause' | 'next' | 'previous') => void
+  setCapture: (mode: InputMode) => void
+  dictate: (currentText: string) => void
+  submitDraft: (text: string, target: string) => void
+  cancelDraft: () => void
+  pin: (block: Block) => void
+  onWidget: (cb: (msg: { id: string; block: Block | null }) => void) => () => void
+  widgetReady: (id: string) => void
+  widgetSize: (id: string, width: number, height: number) => void
+  closeWidget: (id: string) => void
   openSettings: () => void
   openExternal: (url: string) => void
   getSettings: () => Promise<Settings>
@@ -156,6 +252,6 @@ export type WatsonAPI = {
   runningApps: () => Promise<RunningApp[]>
   permissions: () => Promise<PermissionStatus | null>
   requestPermissions: () => Promise<PermissionStatus | null>
-  openPrivacyPane: (pane: 'Microphone' | 'SpeechRecognition' | 'Accessibility' | 'Automation') => void
+  openPrivacyPane: (pane: 'Microphone' | 'SpeechRecognition' | 'Accessibility' | 'Automation' | 'Calendars' | 'Reminders') => void
   testVoice: () => void
 }

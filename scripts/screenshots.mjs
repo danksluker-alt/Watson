@@ -50,7 +50,7 @@ const delegation = {
   reply: 'I updated `src/pages/Home.tsx`:\n\n- Headline is now **Know your cycle.**\n- The button says **Start free**\n\nPull request #142 is open for review.',
 }
 
-const baseState = { phase: 'idle', expanded: false, transcript: '', reply: '', activity: [], panel: null, jobs: [], confirm: null, error: null, notice: null, helperReady: true, hasApiKey: true, usageTodayUsd: 0.0132 }
+const baseState = { phase: 'idle', expanded: false, transcript: '', reply: '', activity: [], panel: null, jobs: [], confirm: null, error: null, notice: null, helperReady: true, hasApiKey: true, usageTodayUsd: 0.0132, capture: 'live', draft: null, insertTarget: null, insertTargetName: null, agents: [{ id: 'claude', name: 'Claude' }, { id: 'grok', name: 'Grok' }], sounds: false }
 
 const scenes = [
   { name: '01-pill', h: 120, state: {} },
@@ -79,6 +79,7 @@ for (const scene of scenes) {
     const noop = () => {}
     window.watson = {
       onState: (cb) => { setTimeout(() => cb(state), 0); return noop },
+      getState: async () => state,
       onLevel: (cb) => { if (level) { const t = setInterval(() => cb(level * (0.6 + Math.random() * 0.6)), 50); return () => clearInterval(t) } return noop },
       setInteractive: noop, focus: noop, toggleListen: noop, ask: noop, cancel: noop, dismiss: noop, answerConfirm: noop, stockRange: noop, spotify: noop,
       openSettings: noop, openExternal: noop, testVoice: noop, openPrivacyPane: noop,

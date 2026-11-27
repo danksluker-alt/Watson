@@ -12,8 +12,13 @@ const STATUS: Record<DelegationData['status'], string> = {
   failed: 'Didn’t finish',
 }
 
-export function AgentMark({ name }: { name: string }) {
-  return <span className="agent-mark" data-agent={name.toLowerCase()}>{name.slice(0, 1)}</span>
+export function AgentMark({ name, small }: { name: string; small?: boolean }) {
+  const key = name.toLowerCase().split(/[\s(]/)[0]
+  return (
+    <span className={small ? 'agent-mark small' : 'agent-mark'} data-agent={key}>
+      {name.slice(0, 1)}
+    </span>
+  )
 }
 
 export function DelegationCard({ data }: { data: DelegationData }) {

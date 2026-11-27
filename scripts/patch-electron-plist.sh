@@ -11,6 +11,10 @@ set_key() {
 }
 set_key NSMicrophoneUsageDescription "Watson (dev) listens when you press the hotkey."
 set_key NSSpeechRecognitionUsageDescription "Watson (dev) turns your voice into text on this Mac."
+set_key NSCalendarsFullAccessUsageDescription "Watson (dev) shows your schedule."
+set_key NSCalendarsUsageDescription "Watson (dev) shows your schedule."
+set_key NSRemindersFullAccessUsageDescription "Watson (dev) shows and adds reminders."
+set_key NSRemindersUsageDescription "Watson (dev) shows and adds reminders."
 set_key NSAppleEventsUsageDescription "Watson (dev) controls Spotify and types into your AI apps."
 codesign --force --deep --sign - node_modules/electron/dist/Electron.app >/dev/null 2>&1 || true
 echo "Patched Electron.app usage descriptions for development."
