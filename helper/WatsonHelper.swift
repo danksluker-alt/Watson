@@ -55,9 +55,16 @@ final class Locked<T> {
 // MARK: - Voice: microphone, recognition, speech
 
 final class Voice: NSObject, AVSpeechSynthesizerDelegate {
-    var engine = AVAudioEngine()
-    var player = AVAudioPlayerNode()
+    // Two engines. On macOS 27 (M1) voice processing works on an input-only engine, but connecting
+    // any output on that engine fails with -10875 or hangs. So the mic engine never plays, and the
+    // voice plays on its own engine. A bonus: Watson can speak without the mic.
+    var engine = AVAudioEngine()       // microphone (with echo cancellation when it works)
+    let outEngine = AVAudioEngine()    // Watson's voice; never touch its inputNode
+    let player = AVAudioPlayerNode()
+    var outRunning = false
+    var stopOutputWork: DispatchWorkItem?
     var configObserver: NSObjectProtocol?
+    var outConfigObserver: NSObjectProtocol?
     /// Set when voice processing (echo cancellation) failed to start on this Mac; we then use the plain mic.
     var voiceProcessingFailed = false
     let playFormat = AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1)!
@@ -99,28 +106,63 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         observeConfigurationChanges()
     }
 
-    /// Plugging in AirPods or switching output stops the engine; rebuild it if we still need it.
+    /// Plugging in AirPods or switching devices stops an engine; restart it if we still need it.
     func observeConfigurationChanges() {
         if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
         configObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             guard let self else { return }
-            log("Audio devices changed; restarting the audio engine.")
+            log("Audio input changed; restarting the microphone.")
             self.engineRunning = false
             self.engine.inputNode.removeTap(onBus: 0)
-            if self.listening || self.isSpeaking {
+            if self.listening {
                 do { try self.ensureEngine() } catch { emit(["ev": "error", "message": error.localizedDescription]) }
+            }
+        }
+        if outConfigObserver == nil {
+            outConfigObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: outEngine, queue: .main) { [weak self] _ in
+                guard let self else { return }
+                log("Audio output changed; restarting the voice.")
+                self.outRunning = false
+                if self.isSpeaking {
+                    do { try self.ensureOutput() } catch { emit(["ev": "error", "message": error.localizedDescription]) }
+                }
             }
         }
     }
 
-    /// A fresh engine and player. A failed voice-processing start can leave the old engine unusable.
+    /// A fresh mic engine. A failed voice-processing start can leave the old one unusable.
     func rebuildEngine() {
         engine.inputNode.removeTap(onBus: 0)
         engine.stop()
         engine = AVAudioEngine()
-        player = AVAudioPlayerNode()
         engineRunning = false
         observeConfigurationChanges()
+    }
+
+    /// Starts the voice engine (output only).
+    func ensureOutput() throws {
+        stopOutputWork?.cancel()
+        if outRunning && outEngine.isRunning { return }
+        if player.engine == nil {
+            outEngine.attach(player)
+            outEngine.connect(player, to: outEngine.mainMixerNode, format: playFormat)
+        }
+        outEngine.prepare()
+        try outEngine.start()
+        outRunning = true
+        player.play()
+    }
+
+    func scheduleOutputStop() {
+        stopOutputWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.isSpeaking, self.outRunning else { return }
+            self.player.stop()
+            self.outEngine.stop()
+            self.outRunning = false
+        }
+        stopOutputWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0, execute: work)
     }
 
     static let micOff = "Watson can't use the microphone. Turn on Watson in System Settings → Privacy & Security → Microphone."
@@ -182,10 +224,6 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         } else if input.isVoiceProcessingEnabled {
             try? input.setVoiceProcessingEnabled(false)
         }
-        if player.engine == nil {
-            engine.attach(player)
-            engine.connect(player, to: engine.mainMixerNode, format: playFormat)
-        }
         let inFormat = input.outputFormat(forBus: 0)
         guard inFormat.sampleRate > 0, inFormat.channelCount > 0 else {
             throw NSError(domain: "watson", code: 1, userInfo: [NSLocalizedDescriptionKey: "No microphone input. Check Microphone permission in System Settings."])
@@ -204,17 +242,15 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
             throw error
         }
         engineRunning = true
-        log("Audio engine started: \(Int(inFormat.sampleRate)) Hz, \(inFormat.channelCount) ch, echo cancellation \(input.isVoiceProcessingEnabled ? "on" : "off")")
-        player.play() // no-op if already playing; needed after an engine restart
+        log("Microphone started: \(Int(inFormat.sampleRate)) Hz, \(inFormat.channelCount) ch, echo cancellation \(input.isVoiceProcessingEnabled ? "on" : "off")")
     }
 
     /// Release the microphone (and the orange dot) shortly after we stop needing it.
     func scheduleEngineStop() {
         stopEngineWork?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self, !self.listening, !self.isSpeaking, self.engineRunning else { return }
+            guard let self, !self.listening, self.engineRunning else { return }
             self.engine.inputNode.removeTap(onBus: 0)
-            self.player.stop()
             self.engine.stop()
             self.engineRunning = false
         }
@@ -363,12 +399,12 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     func writeNext() {
         guard !queue.isEmpty else { checkIdle(); return }
         let item = queue.removeFirst()
-        do { try ensureEngine() } catch {
-            emit(["ev": "error", "message": error.localizedDescription])
+        do { try ensureOutput() } catch {
+            emit(["ev": "error", "message": "Watson couldn't play its voice: \(error.localizedDescription)"])
             queue.removeAll()
             return
         }
-        if engine.isRunning && !player.isPlaying { player.play() }
+        if outEngine.isRunning && !player.isPlaying { player.play() }
         spokenText += " " + item.text
         let utterance = AVSpeechUtterance(string: item.text)
         utterance.voice = selectedVoice()
@@ -435,7 +471,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         spokenText = ""
         announcedIds.removeAll()
         emit(["ev": "speak.idle"])
-        if !listening { scheduleEngineStop() }
+        scheduleOutputStop()
     }
 
     func stopSpeaking(reason: String) {
@@ -855,6 +891,139 @@ func date(_ v: Any?) -> Date? {
     return Date(timeIntervalSince1970: n)
 }
 
+// MARK: - Audio probe (diagnostics)
+
+/// Tries several audio-engine set-ups, each on a fresh engine, and reports which ones start.
+/// Used to find out why voice processing (echo cancellation) fails on a given Mac.
+func audioProbe(only: Int?) -> [[String: Any]] {
+    func attempt(_ name: String, _ setup: (AVAudioEngine) throws -> Void) -> [String: Any] {
+        let e = AVAudioEngine()
+        var result: [String: Any] = ["name": name]
+        do {
+            try setup(e)
+            e.prepare()
+            try e.start()
+            let f = e.inputNode.outputFormat(forBus: 0)
+            result["ok"] = true
+            result["format"] = "\(Int(f.sampleRate)) Hz \(f.channelCount) ch"
+            result["vp"] = e.inputNode.isVoiceProcessingEnabled
+        } catch {
+            result["ok"] = false
+            result["error"] = "\((error as NSError).domain) \((error as NSError).code)"
+        }
+        e.inputNode.removeTap(onBus: 0)
+        e.stop()
+        return result
+    }
+    let tap: (AVAudioEngine) -> Void = { e in
+        let f = e.inputNode.outputFormat(forBus: 0)
+        e.inputNode.installTap(onBus: 0, bufferSize: 1024, format: f) { _, _ in }
+    }
+    let mono24 = AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1)!
+    let mono48 = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+    let stereo48 = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 2)!
+    func player(_ e: AVAudioEngine, to node: AVAudioNode, format: AVAudioFormat?) {
+        let p = AVAudioPlayerNode(); e.attach(p); e.connect(p, to: node, format: format)
+    }
+    // Two more set-ups were tried on macOS 27 / M1 and are deliberately left out: connecting a
+    // player before enabling voice processing, and a player straight into the output node. Both
+    // made engine.start() hang, and killing the hung process left coreaudiod unable to start any
+    // input until it was reset. Never add a set-up here that hasn't been tried by hand first.
+    let variants: [(String, (AVAudioEngine) throws -> Void)] = [
+        ("0 vp + player->mixer 24k mono (current)", { e in try e.inputNode.setVoiceProcessingEnabled(true); player(e, to: e.mainMixerNode, format: mono24); tap(e) }),
+        ("2 vp + player->mixer 48k mono", { e in try e.inputNode.setVoiceProcessingEnabled(true); player(e, to: e.mainMixerNode, format: mono48); tap(e) }),
+        ("3 vp + player->mixer 48k stereo", { e in try e.inputNode.setVoiceProcessingEnabled(true); player(e, to: e.mainMixerNode, format: stereo48); tap(e) }),
+        ("5 vp both nodes + player->mixer 24k", { e in try e.inputNode.setVoiceProcessingEnabled(true); try e.outputNode.setVoiceProcessingEnabled(true); player(e, to: e.mainMixerNode, format: mono24); tap(e) }),
+        ("6 vp + player->mixer, no tap", { e in try e.inputNode.setVoiceProcessingEnabled(true); player(e, to: e.mainMixerNode, format: mono24) }),
+        ("7 vp + input->mixer(vol 0) + player", { e in
+            try e.inputNode.setVoiceProcessingEnabled(true)
+            let mix = AVAudioMixerNode(); e.attach(mix)
+            e.connect(e.inputNode, to: mix, format: e.inputNode.outputFormat(forBus: 0)); mix.outputVolume = 0
+            e.connect(mix, to: e.mainMixerNode, format: nil)
+            player(e, to: e.mainMixerNode, format: mono24)
+        }),
+    ]
+    if let only {
+        guard only >= 0 && only < variants.count else { return [] }
+        return [attempt(variants[only].0, variants[only].1)]
+    }
+    return variants.map { attempt($0.0, $0.1) }
+}
+
+/// Echo test: says a sentence through the speakers (a separate path from the mic) while
+/// recognizing what the mic hears, with or without voice processing on the mic engine.
+/// If echo cancellation works across engines, the transcript with vp=true stays (nearly) empty.
+final class EchoTest: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
+    let engine = AVAudioEngine()
+    let synth = AVSpeechSynthesizer()
+    var request: SFSpeechAudioBufferRecognitionRequest?
+    var task: SFSpeechRecognitionTask?
+    var text = ""
+    var recError = ""
+    let peak = Locked<Float>(0)
+    let peakWhileSpeaking = Locked<Float>(0)
+    let speaking = Locked<Bool>(false)
+    var spoke = false
+
+    func speechSynthesizer(_ s: AVSpeechSynthesizer, didStart u: AVSpeechUtterance) { speaking.set(true) }
+    func speechSynthesizer(_ s: AVSpeechSynthesizer, didFinish u: AVSpeechUtterance) { speaking.set(false); spoke = true }
+
+    func run(vp: Bool, done: @escaping ([String: Any]) -> Void) {
+        let recFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
+        do {
+            if vp { try engine.inputNode.setVoiceProcessingEnabled(true) }
+            let inFormat = engine.inputNode.outputFormat(forBus: 0)
+            guard let conv = AVAudioConverter(from: inFormat, to: recFormat) else { throw NSError(domain: "no converter", code: 0) }
+            if inFormat.channelCount > 1 { conv.channelMap = [0] }
+            let req = SFSpeechAudioBufferRecognitionRequest()
+            req.shouldReportPartialResults = true
+            req.requiresOnDeviceRecognition = true
+            request = req
+            synth.delegate = self
+            engine.inputNode.installTap(onBus: 0, bufferSize: 1024, format: inFormat) { [weak self] buffer, _ in
+                if let self, let ch = buffer.floatChannelData?[0] {
+                    var m: Float = 0
+                    for i in 0..<Int(buffer.frameLength) { m = max(m, abs(ch[i])) }
+                    if m > self.peak.get() { self.peak.set(m) }
+                    if self.speaking.get() && m > self.peakWhileSpeaking.get() { self.peakWhileSpeaking.set(m) }
+                }
+                let cap = AVAudioFrameCount(Double(buffer.frameLength) * 16_000 / inFormat.sampleRate) + 64
+                guard let out = AVAudioPCMBuffer(pcmFormat: recFormat, frameCapacity: cap) else { return }
+                var fed = false
+                conv.convert(to: out, error: nil) { _, st in
+                    if fed { st.pointee = .noDataNow; return nil }
+                    fed = true; st.pointee = .haveData; return buffer
+                }
+                if out.frameLength > 0 { req.append(out) }
+            }
+            engine.prepare()
+            try engine.start()
+            let rec = SFSpeechRecognizer(locale: Locale(identifier: "en-US"))
+            if rec?.isAvailable != true { recError = "recognizer unavailable" }
+            task = rec?.recognitionTask(with: req) { [weak self] r, e in
+                if let t = r?.bestTranscription.formattedString { self?.text = t }
+                if let e { self?.recError = e.localizedDescription }
+            }
+        } catch {
+            done(["vp": vp, "error": "\(error)"]); return
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            let u = AVSpeechUtterance(string: "The quick brown fox jumps over the lazy dog, and the five boxing wizards jump quickly.")
+            self.synth.speak(u)
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            self.request?.endAudio()
+            self.engine.inputNode.removeTap(onBus: 0)
+            self.engine.stop()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
+                self.task?.cancel()
+                done(["vp": vp, "heard": self.text, "spoke": self.spoke, "peak": self.peak.get(), "peakWhileSpeaking": self.peakWhileSpeaking.get(), "recError": self.recError, "format": "\(self.engine.inputNode.outputFormat(forBus: 0))"])
+            }
+        }
+    }
+}
+var echoTest: EchoTest?
+
 func handle(_ msg: [String: Any]) {
     let id = msg["id"] as? String
     let cmd = msg["cmd"] as? String ?? ""
@@ -972,6 +1141,11 @@ func handle(_ msg: [String: Any]) {
             do { reply(id, data: try Apple.addReminder(title: msg["title"] as? String ?? "", due: date(msg["due"]), list: msg["list"] as? String)) }
             catch { reply(id, ok: false, error: error.localizedDescription) }
         }
+    case "echo.test":
+        let t = EchoTest(); echoTest = t
+        t.run(vp: msg["vp"] as? Bool ?? true) { reply(id, data: $0); echoTest = nil }
+    case "audio.probe":
+        reply(id, data: audioProbe(only: msg["only"] as? Int))
     case "ping":
         reply(id, data: ["pong": true])
     default:

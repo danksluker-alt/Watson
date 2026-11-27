@@ -27,5 +27,10 @@
   "Apple Development" cert, else ad hoc. A stable identity keeps TCC permissions across rebuilds.
 - Log: `~/Library/Logs/Watson/watson.log` (tests write into their temp profile instead). Log
   states and errors only, never keys or conversation text.
-- If echo cancellation (voice processing) fails to start, the helper falls back to the plain mic
-  (`voiceProcessingFailed`) and logs it.
+- Audio uses two engines: `engine` (mic, voice processing = echo cancellation) and `outEngine`
+  (Watson's voice). On macOS 27/M1, voice processing works on an input-only engine but any output
+  on that same engine fails (-10875) or hangs. If voice processing still fails, the helper falls
+  back to the plain mic (`voiceProcessingFailed`) and logs it.
+- Diagnostics in the helper: `audio.probe` (tries engine set-ups) and `echo.test` (speaks a
+  sentence while recognizing the mic, `vp` on/off). Never add a probe set-up that can hang:
+  killing a hung `engine.start()` wedged coreaudiod until the Mac was restarted.
