@@ -1,10 +1,10 @@
 # Runs the unit tests and the end-to-end scenarios (real app, fake native
-# helper, mock Claude API) on every push.
+# helper, mock Claude API) when started by hand.
 name: Tests
 
 on:
-  push:
-  pull_request:
+  # Manual only: the Actions budget is limited, so build and test locally.
+  workflow_dispatch:
 
 jobs:
   test:
@@ -20,7 +20,6 @@ jobs:
       - name: Install
         run: |
           npm ci
-          npm install --no-save playwright
 
       - name: Types and unit tests
         run: |

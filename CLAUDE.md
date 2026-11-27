@@ -16,5 +16,10 @@
   and pinned widget windows (`src/main/pinned.ts`).
 - Test seams (env): `WATSON_HELPER_CMD`, `WATSON_FAKE_OS`, `WATSON_MOCK_DATA`, `WATSON_USER_DATA`,
   `WATSON_POLL_MS`, `ANTHROPIC_BASE_URL`/`ANTHROPIC_API_KEY`. Used by `tests/e2e/run.mjs`.
-- Before committing: `npm run typecheck`, `npm test`, `npm run build`, and `npm run e2e:linux`
-  (or `npm run e2e` on a Mac) when behaviour changes.
+- Before committing: `npm run typecheck`, `npm test`, `npm run build`, and `npm run e2e`
+  (`npm run e2e:linux` on Linux). Playwright is a dev dependency (only its Electron driver is used;
+  no browser download).
+- Build and test locally. The owner's GitHub Actions budget is limited: the workflows are
+  `workflow_dispatch` only, so pushes to main don't start them.
+- Keep the checkout out of iCloud Drive (Desktop/Documents sync): offloaded "dataless" files in
+  `node_modules` make Node and Electron hang at startup. The owner's checkout is `~/Developer/Watson`.

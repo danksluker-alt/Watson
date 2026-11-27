@@ -12,18 +12,18 @@ website in your browser. That covers coding, changing your website, or anything 
 their Gmail, Calendar or Drive connectors. Watson watches for the answer and reads you a short
 summary. The work runs on that service's own plan, not on Watson's API key.
 
-## Install (no terminal needed)
+## Install
 
-1. Open this repository's **Releases** page and download **Watson-mac.zip** from "Watson — latest build".
-   GitHub builds it automatically on a Mac every time the code changes.
-2. Open the zip and drag **Watson** into **Applications**.
-3. Open Watson. macOS blocks apps from outside the App Store the first time: go to **System Settings →
-   Privacy & Security**, scroll down, and click **Open Anyway** next to Watson.
-4. Watson opens Settings: paste your Anthropic API key and allow the permissions it asks for.
-   Its icon lives in the menu bar; the pill sits at the top of your screen.
+Watson is built and tested locally on the Mac (see **Build the app** below): `npm run dist`
+makes `release/mac-arm64/Watson.app`, which goes in **Applications**. Its icon lives in the menu
+bar; the pill sits at the top of your screen. The first launch opens Settings: paste your
+Anthropic API key and allow the permissions it asks for.
 
 Each new build has a new signature, so macOS may ask for permissions again after an update.
-(A paid Apple Developer account would remove that and the "Open Anyway" step.)
+(A paid Apple Developer account would remove that.)
+
+The GitHub Actions workflows in `.github/workflows` only run when started by hand
+(Actions → Run workflow); pushes don't trigger them.
 
 ## Two ways to talk
 
@@ -89,6 +89,10 @@ Notes, pmset, Spotify or Music) and draws its own widgets in the same style.
 ## Developing on your Mac (Apple Silicon)
 
 You need Node 20+ and the Swift compiler. If you don't have Xcode, run `xcode-select --install`.
+
+Keep the project **outside** iCloud-synced folders (Desktop and Documents when "Desktop & Documents
+Folders" is on). With "Optimize Mac Storage", iCloud offloads files in `node_modules` and the app
+hangs at launch while reading them. `~/Developer/Watson` is a good place.
 
 ```bash
 git clone https://github.com/<you>/Watson.git && cd Watson
