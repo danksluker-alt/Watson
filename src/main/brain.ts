@@ -349,6 +349,8 @@ function systemPrompt(settings: Settings, spoken: boolean): string {
     .join('\n')
 }
 
+const mode = (spoken: boolean) => (spoken ? 'voice' : 'typed')
+
 /** A closing line that adds nothing after a real answer. */
 const FILLER = /^(done|shown|all set|okay|ok|there you go|here you go|got it)[.!]?$/i
 
@@ -466,6 +468,7 @@ export class Brain {
             const out = await this.runTool(call.name, call.input, settings, opts.host)
             return { type: 'tool_result', tool_use_id: call.id, content: out }
           } catch (e) {
+            console.warn(`[watson] tool ${call.name} failed:`, (e instanceof Error ? e.message : String(e)).slice(0, 300))
             return { type: 'tool_result', tool_use_id: call.id, is_error: true, content: e instanceof Error ? e.message : String(e) }
           }
         }),
@@ -473,6 +476,7 @@ export class Brain {
       messages.push({ role: 'user', content: results })
     }
 
+    console.log(`[watson] answered (${model === SONNET ? 'Sonnet' : 'Haiku'}, ${mode(opts.spoken)}) tools: ${toolsUsed.join(', ') || 'none'}`)
     // Keep only plain text in memory: small, cheap context next time.
     const remembered = finalText.trim() || (toolsUsed.length ? `(used ${[...new Set(toolsUsed)].join(', ')})` : '(no answer)')
     this.history.push({ role: 'user', content: text }, { role: 'assistant', content: remembered })

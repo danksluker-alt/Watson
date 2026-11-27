@@ -365,21 +365,27 @@ function onHelperEvent(e: HelperEvent) {
       liveOverlay()?.webContents.send('level', e.value)
       break
     case 'partial':
+      // Talking to Watson acknowledges a timer that's ringing.
+      if (store.state.ringing) stopRinging()
       clearTimer('noSpeech')
       clearTimer('followUp')
       if (store.state.phase !== 'listening') store.set({ phase: 'listening', reply: store.state.draft ? store.state.reply : '' })
       store.set({ transcript: e.text })
       break
     case 'final':
+      console.log(`[watson] heard ${e.text.split(/\s+/).filter(Boolean).length} words (${store.state.capture})`)
       listening = false
       if (store.state.capture === 'review') appendDraft(e.text)
       else void handleUtterance(e.text, 'voice')
       break
     case 'nospeech':
+      console.log('[watson] no speech')
       listening = false
       if (store.state.phase === 'listening') goIdle()
       break
     case 'bargein':
+      console.log('[watson] interrupted by the user')
+      if (store.state.ringing) stopRinging()
       turnAbort?.abort()
       responding = false
       speakingActive = false
@@ -392,6 +398,7 @@ function onHelperEvent(e: HelperEvent) {
       if (!listening) startListening('watch') // so you can interrupt
       break
     case 'speak.idle':
+      console.log(`[watson] finished speaking${e.stopped ? ' (stopped)' : ''}`)
       speakingActive = false
       if (!e.stopped) afterSpeech()
       break
@@ -495,6 +502,7 @@ async function runTurn(text: string, mode: 'voice' | 'text') {
   } catch (e) {
     if (ac.signal.aborted) return
     const message = e instanceof BudgetError || e instanceof Error ? e.message : String(e)
+    console.error('[watson] answer failed:', message.slice(0, 300))
     store.finishActivity(thinking, 'error', 'Something went wrong')
     store.set({ error: friendlyError(message), reply: '' })
     if (mode === 'voice') speakText(e instanceof BudgetError ? message : 'Sorry, something went wrong. The details are on screen.')
