@@ -26,6 +26,22 @@ const brain = new Brain()
 let overlay: BrowserWindow | null = null
 let settingsWin: BrowserWindow | null = null
 let tray: Tray | null = null
+let quitting = false
+
+/** The overlay, if it still exists. During quit its window is destroyed before the helper exits. */
+function liveOverlay(): BrowserWindow | null {
+  return overlay && !overlay.isDestroyed() && !overlay.webContents.isDestroyed() ? overlay : null
+}
+
+// An uncaught error in the main process makes Electron show a modal dialog that freezes Watson
+// (and, for a menu-bar app, is often hidden behind other windows). Log it and show it in the pill.
+process.on('uncaughtException', (err) => {
+  console.error('[watson] uncaught exception:', err?.stack ?? err)
+  if (!quitting) store.set({ error: `Something went wrong inside Watson: ${err?.message ?? err}`, expanded: true })
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[watson] unhandled rejection:', reason instanceof Error ? reason.stack : reason)
+})
 
 const OVERLAY_W = 760
 const OVERLAY_H = 720
@@ -175,7 +191,7 @@ function createTray() {
 }
 
 function pushState(s: UIState) {
-  overlay?.webContents.send('state', { ...s, usageTodayUsd: spentToday() })
+  liveOverlay()?.webContents.send('state', { ...s, usageTodayUsd: spentToday() })
 }
 store.on('change', pushState)
 
@@ -216,6 +232,7 @@ function registerHotkeys() {
       bad.push(accel)
     }
   }
+  console.log(`[watson] hotkeys: ${[s.hotkey, s.reviewHotkey].filter(Boolean).map((a) => `${a} ${globalShortcut.isRegistered(a) ? 'ok' : 'FAILED'}`).join(', ')}`)
   if (bad.length) store.set({ error: `${bad.join(' and ')} ${bad.length > 1 ? 'are' : 'is'} taken by another app. Pick another shortcut in Settings.` })
 }
 
@@ -332,7 +349,7 @@ function appendDraft(text: string) {
   const joined = prev ? `${prev} ${text.trim()}` : text.trim()
   store.set({ draft: { id: ++draftSeq, text: joined }, phase: 'idle', transcript: '', capture: 'review', expanded: true })
   clearTimer('noSpeech')
-  overlay?.focus() // so the text can be edited right away
+  liveOverlay()?.focus() // so the text can be edited right away
 }
 
 function onHelperEvent(e: HelperEvent) {
@@ -343,7 +360,7 @@ function onHelperEvent(e: HelperEvent) {
       void maybeRequestPermissions()
       break
     case 'level':
-      overlay?.webContents.send('level', e.value)
+      liveOverlay()?.webContents.send('level', e.value)
       break
     case 'partial':
       clearTimer('noSpeech')
@@ -511,7 +528,8 @@ async function rememberInsertTarget() {
 }
 
 function onHotkey(mode: InputMode) {
-  if (overlay && store.state.phase === 'idle') overlay.setBounds(overlayBounds())
+  console.log(`[watson] hotkey (${mode}) while ${store.state.phase}`)
+  if (liveOverlay() && store.state.phase === 'idle') overlay!.setBounds(overlayBounds())
   switch (store.state.phase) {
     case 'idle':
       // Remember the app you were in, so dictation can be typed back into it.
@@ -678,10 +696,10 @@ setInterval(() => {
 function registerIpc() {
   ipcMain.on('ui:interactive', (_e, interactive: boolean) => {
     hovered = interactive
-    overlay?.setIgnoreMouseEvents(!interactive, { forward: true })
+    liveOverlay()?.setIgnoreMouseEvents(!interactive, { forward: true })
   })
   // Only take keyboard focus when the user chooses to type, never on hover.
-  ipcMain.on('ui:focus', () => overlay?.focus())
+  ipcMain.on('ui:focus', () => liveOverlay()?.focus())
   ipcMain.on('ui:toggleListen', () => onHotkey(store.state.draft ? 'review' : getSettings().inputMode))
   ipcMain.on('ui:ask', (_e, text: string) => {
     if (listening) helper.send('listen.cancel')
@@ -802,6 +820,7 @@ app.whenReady().then(() => {
   syncFromSettings(getSettings())
   helper.on('event', onHelperEvent)
   helper.on('exit', (code) => {
+    if (quitting) return
     console.warn('[watson] helper exited with code', code)
     store.set({ helperReady: false })
   })
@@ -810,11 +829,15 @@ app.whenReady().then(() => {
   const keys = secretStatus()
   store.set({ hasApiKey: keys.anthropic })
   if (!keys.anthropic) openSettings()
-  screen.on('display-metrics-changed', () => overlay?.setBounds(overlayBounds()))
+  screen.on('display-metrics-changed', () => liveOverlay()?.setBounds(overlayBounds()))
 })
 
 app.on('second-instance', () => openSettings())
+app.on('before-quit', () => {
+  quitting = true
+})
 app.on('will-quit', () => {
+  quitting = true
   globalShortcut.unregisterAll()
   pinned.stop()
   helper.stop()
