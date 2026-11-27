@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key><string>com.watson.assistant.helper</string>
+  <key>CFBundleName</key><string>watson-helper</string>
+  <key>NSMicrophoneUsageDescription</key><string>Watson listens when you press the hotkey or click the pill.</string>
+  <key>NSSpeechRecognitionUsageDescription</key><string>Watson turns your voice into text on this Mac.</string>
+  <key>NSAppleEventsUsageDescription</key><string>Watson types your requests into your AI apps when you ask.</string>
+</dict>
+</plist>

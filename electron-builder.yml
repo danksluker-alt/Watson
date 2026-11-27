@@ -1,0 +1,20 @@
+appId: com.watson.assistant
+productName: Watson
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
+extraResources:
+  - from: helper/build/watson-helper
+    to: watson-helper
+mac:
+  target: dir
+  category: public.app-category.productivity
+  identity: null
+  hardenedRuntime: false
+  extendInfo:
+    LSUIElement: true
+    NSMicrophoneUsageDescription: Watson listens when you press the hotkey or click the pill.
+    NSSpeechRecognitionUsageDescription: Watson turns your voice into text on this Mac.
+    NSAppleEventsUsageDescription: Watson controls Spotify and types your requests into your AI apps when you ask.
