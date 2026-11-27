@@ -608,6 +608,34 @@ enum AX {
         return (attr(input, kAXFocusedAttribute) as? Bool) ?? true
     }
 
+    /// Diagnostics: elements in a window whose value can be edited (candidate message boxes). Read-only.
+    static func editables(_ window: AXUIElement) -> [[String: String]] {
+        var out: [[String: String]] = []
+        var visited = 0
+        var webAreas = 0
+        func walk(_ el: AXUIElement, depth: Int, inWeb: Bool) {
+            visited += 1
+            if visited > 80_000 || depth > 150 || out.count >= 30 { return }
+            let role = string(el, kAXRoleAttribute) ?? ""
+            let web = inWeb || role == "AXWebArea"
+            if role == "AXWebArea" { webAreas += 1 }
+            if ["AXTextArea", "AXTextField", "AXComboBox", "AXSearchField"].contains(role) || (role == "AXGroup" && web && (attr(el, "AXEditableAncestor") != nil) && CFEqual(attr(el, "AXEditableAncestor"), el)) {
+                out.append([
+                    "role": role,
+                    "subrole": string(el, kAXSubroleAttribute) ?? "",
+                    "placeholder": string(el, "AXPlaceholderValue") ?? "",
+                    "description": string(el, kAXDescriptionAttribute) ?? "",
+                    "inPage": web ? "yes" : "no",
+                    "depth": String(depth),
+                ])
+            }
+            for kid in children(el) { walk(kid, depth: depth + 1, inWeb: web) }
+        }
+        walk(window, depth: 0, inWeb: false)
+        out.append(["summary": "visited \(visited) elements, web areas \(webAreas)"])
+        return out
+    }
+
     /// The app's menu bar: each menu with its items and their ⌘ shortcuts. Read-only.
     static func menus(_ app: AXUIElement) -> [[String: Any]] {
         guard let bar = attr(app, kAXMenuBarAttribute) else { return [] }
@@ -675,15 +703,28 @@ enum AX {
         return (lines, busy)
     }
 
+    /// Labels of form fields that must never receive a prompt.
+    static let notAChatBox = #"\b(name|age|birth(day|date)?|e-?mail|password|phone|search|url|zip)\b"#
+    static let chatBox = #"\b(ask|message|chat|prompt|reply|send|type|anything|help|question|talk)\b"#
+
+    /// The chat's message box: a multi-line text area, or a text field labelled like one.
+    /// Plain form fields ("Full Name", "Age", search boxes) are never chosen.
     static func findInput(_ window: AXUIElement) -> AXUIElement? {
         var found: AXUIElement?
         var visited = 0
+        func label(_ el: AXUIElement) -> String {
+            [string(el, "AXPlaceholderValue"), string(el, kAXDescriptionAttribute), string(el, kAXTitleAttribute), string(el, kAXHelpAttribute)]
+                .compactMap { $0 }.joined(separator: " ")
+        }
+        func matches(_ text: String, _ pattern: String) -> Bool { text.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil }
         func walk(_ el: AXUIElement, depth: Int) {
             visited += 1
             if visited > 40_000 || depth > 90 { return }
             let role = string(el, kAXRoleAttribute) ?? ""
             if role == "AXTextArea" || (role == "AXTextField" && string(el, kAXSubroleAttribute) != "AXSearchField") {
-                found = el // keep the last one: chat boxes sit at the bottom
+                let l = label(el)
+                let ok = !matches(l, notAChatBox) && (role == "AXTextArea" || matches(l, chatBox))
+                if ok { found = el } // keep the last one: chat boxes sit at the bottom
             }
             if role == "AXToolbar" || role == "AXTabGroup" { return } // not the browser's address bar
             for kid in children(el) { walk(kid, depth: depth + 1) }
@@ -1206,6 +1247,20 @@ func handle(_ msg: [String: Any]) {
                 wins = read()
             }
             reply(id, data: ["windows": wins])
+        }
+    case "ax.inputs":
+        let bundleId = msg["bundleId"] as? String ?? ""
+        axQueue.async {
+            guard let pair = AX.appElement(bundleId) else { reply(id, ok: false, error: "That app isn't open."); return }
+            usleep(800_000)
+            let main = AX.mainWindow(pair.1)
+            let wins = AX.windows(pair.1).prefix(6).map { w -> [String: Any] in
+                ["title": AX.string(w, kAXTitleAttribute) ?? "", "main": main.map { CFEqual($0, w) } ?? false, "editables": AX.editables(w)]
+            }
+            let chosen = main.flatMap { AX.findInput($0) }
+            reply(id, data: ["windows": wins, "chosen": chosen.map { el -> String in
+                "\(AX.string(el, kAXRoleAttribute) ?? "") \"\(AX.string(el, "AXPlaceholderValue") ?? AX.string(el, kAXDescriptionAttribute) ?? "")\""
+            } ?? "none"])
         }
     case "ax.menus":
         let bundleId = msg["bundleId"] as? String ?? ""

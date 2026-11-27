@@ -40,4 +40,7 @@
   (`AgentTarget.chatMenu`, then "New Chat"), never a blind ⌘N. No message box found = nothing is
   pasted. Each message also appears as a screen-reader copy ("You said: …"); `extract.ts` drops
   those and rejoins text split at bold words. Fixture: `tests/fixtures/claude-chat-ready.json`.
-- `ax.menus` lists an app's menu items and shortcuts (read-only) when adding a new app agent.
+- `ax.menus` lists an app's menu items and shortcuts; `ax.inputs` lists text boxes and says which one
+  `findInput` would pick (both read-only). `findInput` only accepts a text area or a field labelled
+  like a chat box, never form fields (name, age, email, password, search): grok.com once showed an
+  age form whose "Age" field would otherwise have received the prompt.
