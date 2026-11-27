@@ -16,7 +16,7 @@ const out = (obj) => process.stdout.write(JSON.stringify(obj) + '\n')
 const reply = (id, data, ok = true, error) => id && out({ ev: 'result', id, ok, ...(data !== undefined ? { data } : {}), ...(error ? { error } : {}) })
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-const log = { spoken: [], sent: [], inserted: [], exec: [], calendarAdds: [], reminderAdds: [], commands: [] }
+const log = { spoken: [], sent: [], inserted: [], exec: [], calendarAdds: [], reminderAdds: [], reminderDone: [], commands: [] }
 let listening = false
 let session = 0
 let speakQueue = []
@@ -111,6 +111,7 @@ const notes = [
 function execFake(cmd, args) {
   const script = args.join(' ')
   log.exec.push({ cmd, script: script.slice(0, 400) })
+  if (script.includes('get volume settings')) return '60,false'
   if (cmd.endsWith('pmset')) return "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=4653155)\t76%; discharging; 4:21 remaining present: true"
   if (script.includes('application "Notes"')) {
     if (script.includes('make new note')) return ''
@@ -239,6 +240,13 @@ async function handle(msg) {
       reminders.unshift(r)
       log.reminderAdds.push(r)
       return reply(id, { title: msg.title, list: r.list })
+    }
+    case 'reminders.complete': {
+      const i = reminders.findIndex((r) => r.title.toLowerCase().includes(String(msg.title).toLowerCase()))
+      if (i < 0) return reply(id, undefined, false, `There's no open reminder called "${msg.title}".`)
+      const [r] = reminders.splice(i, 1)
+      log.reminderDone.push(r.title)
+      return reply(id, { title: r.title, list: r.list })
     }
     case 'exec':
       return reply(id, execFake(msg.program, msg.args ?? []))

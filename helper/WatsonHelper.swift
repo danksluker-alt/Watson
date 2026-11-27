@@ -851,6 +851,29 @@ enum Apple {
         try eventStore.save(r, commit: true)
         return ["title": title, "list": cal?.title ?? "Reminders"]
     }
+
+    /// Marks one incomplete reminder done: an exact title match wins, otherwise a single
+    /// reminder containing the words. Several possible matches is an error that lists them.
+    static func completeReminder(_ match: String, _ done: @escaping (Result<[String: Any], Error>) -> Void) {
+        let pred = eventStore.predicateForIncompleteReminders(withDueDateStarting: nil, ending: nil, calendars: nil)
+        eventStore.fetchReminders(matching: pred) { found in
+            let all = found ?? []
+            let q = match.trimmingCharacters(in: .whitespaces).lowercased()
+            let exact = all.filter { ($0.title ?? "").lowercased() == q }
+            let partial = all.filter { ($0.title ?? "").lowercased().contains(q) }
+            let pick = exact.count == 1 ? exact : partial
+            DispatchQueue.main.async {
+                func fail(_ m: String) { done(.failure(NSError(domain: "watson", code: 4, userInfo: [NSLocalizedDescriptionKey: m]))) }
+                guard !q.isEmpty, let r = pick.first else { return fail("There's no open reminder called \"\(match)\".") }
+                if pick.count > 1 { return fail("Several reminders match: \(pick.prefix(5).compactMap { $0.title }.joined(separator: ", ")). Which one?") }
+                r.isCompleted = true
+                do {
+                    try eventStore.save(r, commit: true)
+                    done(.success(["title": r.title ?? match, "list": r.calendar.title]))
+                } catch { done(.failure(error)) }
+            }
+        }
+    }
 }
 
 // MARK: - Command loop
@@ -1146,6 +1169,16 @@ func handle(_ msg: [String: Any]) {
         t.run(vp: msg["vp"] as? Bool ?? true) { reply(id, data: $0); echoTest = nil }
     case "audio.probe":
         reply(id, data: audioProbe(only: msg["only"] as? Int))
+    case "reminders.complete":
+        Apple.access(.reminder) { granted in
+            guard granted else { reply(id, ok: false, error: "Watson doesn't have access to Reminders."); return }
+            Apple.completeReminder(msg["title"] as? String ?? "") { result in
+                switch result {
+                case .success(let data): reply(id, data: data)
+                case .failure(let error): reply(id, ok: false, error: error.localizedDescription)
+                }
+            }
+        }
     case "ping":
         reply(id, data: ["pong": true])
     default:

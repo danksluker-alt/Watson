@@ -10,6 +10,7 @@ import { Bars, Orb } from './components/Orb'
 import { play } from './sounds'
 import { Blocks } from './widgets/Blocks'
 import { AgentMark } from './widgets/Delegation'
+import { countdown, RingingCard } from './widgets/Timers'
 
 const SPRING = { type: 'spring' as const, stiffness: 420, damping: 34, mass: 0.9 }
 const WIDTH = { pill: 168, compact: 500, panel: 680 }
@@ -61,6 +62,27 @@ function useSounds(s: UIState | null) {
     if (s.jobs.some((j) => j.status === 'waiting' && was(j.jobId) === 'sending')) play('sent')
     if (s.jobs.some((j) => j.status === 'done' && was(j.jobId) !== 'done')) play('arrived')
   }, [s])
+
+  // A timer that went off rings every 2.5 s until it's stopped, even with interface sounds off.
+  const ringing = s?.ringing?.id
+  useEffect(() => {
+    if (!ringing) return
+    play('ring')
+    const t = setInterval(() => play('ring'), 2500)
+    return () => clearInterval(t)
+  }, [ringing])
+}
+
+/** The next timer's countdown, for the idle pill. */
+function useNextTimer(s: UIState | null): string | null {
+  const next = s?.timers.find((t) => t.kind === 'timer') ?? null
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!next) return
+    const t = setInterval(() => setNow(Date.now()), 500)
+    return () => clearInterval(t)
+  }, [next])
+  return next && next.endsAt > now ? countdown(next.endsAt - now) : null
 }
 
 // ---------------- Review editor ----------------
@@ -179,6 +201,7 @@ export function Overlay() {
     return off
   }, [])
   useSounds(s)
+  const nextTimer = useNextTimer(s)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -199,7 +222,7 @@ export function Overlay() {
 
   const jobs = s.jobs.filter((j) => !['done', 'failed'].includes(j.status))
   const reviewing = Boolean(s.draft) || (s.capture === 'review' && s.phase === 'listening' && Boolean(s.transcript))
-  const hasPanel = reviewing || Boolean(s.panel || s.confirm || s.error || s.notice || typing || (s.expanded && s.reply))
+  const hasPanel = reviewing || Boolean(s.panel || s.confirm || s.error || s.notice || s.ringing || typing || (s.expanded && s.reply))
   const mode: Mode = hasPanel ? 'panel' : s.phase !== 'idle' ? 'compact' : 'pill'
 
   const enter = () => {
@@ -255,6 +278,11 @@ export function Overlay() {
                     <span className="spinner" />
                     {jobs[0].agent}
                     {jobs.length > 1 && ` +${jobs.length - 1}`}
+                  </span>
+                ) : nextTimer && !hover ? (
+                  <span className="pill-timer">
+                    <span className="pill-timer-dot" />
+                    {nextTimer}
                   </span>
                 ) : (
                   <span className="pill-label">{hover ? '⌥ Space' : 'Watson'}</span>
@@ -422,6 +450,7 @@ export function Overlay() {
                         </motion.div>
                       )}
 
+                      {s.ringing && <RingingCard t={s.ringing} />}
                       {s.error && <ErrorCard message={s.error} />}
                       {s.notice && <div className="card notice">{s.notice}</div>}
                       {s.panel && <Blocks blocks={s.panel.blocks} />}

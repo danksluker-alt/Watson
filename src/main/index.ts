@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, screen, shell, Tray } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } from 'electron'
 import path from 'node:path'
 import type { Block, InputMode, MusicApp, Panel, PermissionStatus, RunningApp, SecretName, Settings, StockRange, UIState, VoiceInfo } from '@shared/types'
 import { Brain, BudgetError, type ToolHost } from './brain'
@@ -13,6 +13,8 @@ import * as music from './tools/music'
 import { setExecBridge } from './tools/os'
 import { getStock } from './tools/stocks'
 import { spentToday } from './usage'
+import { timerName, timers as timerStore } from './timers'
+import type { TimerItem } from '@shared/types'
 import { paramsOf } from './widgets'
 
 // Tests run against a throwaway profile.
@@ -528,6 +530,7 @@ async function rememberInsertTarget() {
 }
 
 function onHotkey(mode: InputMode) {
+  if (store.state.ringing) return stopRinging()
   console.log(`[watson] hotkey (${mode}) while ${store.state.phase}`)
   if (liveOverlay() && store.state.phase === 'idle') overlay!.setBounds(overlayBounds())
   switch (store.state.phase) {
@@ -650,6 +653,27 @@ function announce(spoken: string, panel: Panel | null) {
   }
 }
 
+// ---------------- Timers ----------------
+
+let ringTimeout: NodeJS.Timeout | null = null
+
+function stopRinging() {
+  if (ringTimeout) clearTimeout(ringTimeout)
+  ringTimeout = null
+  if (store.state.ringing) store.set({ ringing: null })
+}
+
+function onTimerFire(t: TimerItem) {
+  const name = timerName(t)
+  console.log(`[watson] ${t.kind} went off`)
+  store.set({ ringing: t, expanded: true })
+  if (Notification.isSupported()) new Notification({ title: t.kind === 'alarm' ? 'Alarm' : 'Timer done', body: name.charAt(0).toUpperCase() + name.slice(1), silent: true }).show()
+  announce(t.kind === 'alarm' ? `It's time${t.label ? ` for ${t.label}` : ''}. Your alarm is going off.` : `Your ${name} is done.`, null)
+  // The chime repeats in the pill until it's dismissed, for up to a minute.
+  if (ringTimeout) clearTimeout(ringTimeout)
+  ringTimeout = setTimeout(stopRinging, 60_000)
+}
+
 const delegations = new Delegations({
   helper,
   store,
@@ -711,7 +735,12 @@ function registerIpc() {
     helper.send('speak.stop')
     stopListening(true)
   })
-  ipcMain.on('ui:dismiss', () => dismiss())
+  ipcMain.on('ui:dismiss', () => {
+    stopRinging()
+    dismiss()
+  })
+  ipcMain.on('timer:cancel', (_e, id: string) => timerStore.cancel(String(id)))
+  ipcMain.on('timer:stopRinging', () => stopRinging())
   ipcMain.on('ui:confirm', (_e, id: string, ok: boolean) => confirms.get(id)?.(Boolean(ok)))
   ipcMain.on('ui:openSettings', () => openSettings())
   ipcMain.on('ui:openExternal', (_e, url: string) => {
@@ -825,6 +854,10 @@ app.whenReady().then(() => {
     store.set({ helperReady: false })
   })
   helper.start()
+  timerStore.on('change', (list: TimerItem[]) => store.set({ timers: list }))
+  timerStore.on('fire', onTimerFire)
+  timerStore.restore()
+  store.set({ timers: timerStore.list() })
   pinned.restore()
   const keys = secretStatus()
   store.set({ hasApiKey: keys.anthropic })
@@ -839,6 +872,7 @@ app.on('before-quit', () => {
 app.on('will-quit', () => {
   quitting = true
   globalShortcut.unregisterAll()
+  timerStore.stop()
   pinned.stop()
   helper.stop()
 })

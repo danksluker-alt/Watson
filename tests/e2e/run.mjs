@@ -248,6 +248,37 @@ await scenario('Notes, world clock and battery widgets', async () => {
   await shot('15-battery')
 })
 
+await scenario('Timer: counts down in the pill, rings, stops', async () => {
+  await talk('Set a tea timer for 12 seconds')
+  await overlay.waitForSelector('.timers-w .timer-row', { timeout: 10_000 })
+  await shot('21-timer')
+  await overlay.evaluate(() => window.watson.dismiss())
+  await overlay.mouse.move(5, 700)
+  await overlay.waitForSelector('.pill-timer', { timeout: 5000 })
+  await sleep(700)
+  await overlay.screenshot({ path: path.join(shots, '22-pill-timer.png') })
+  await overlay.waitForSelector('.card.ringing', { timeout: 15_000 })
+  await shot('23-timer-ringing')
+  await until(async () => (await helper('/state')).spoken.some((x) => /tea timer is done/i.test(x)), 8000)
+  await overlay.click('.ringing-stop')
+  await until(async () => !(await overlay.$('.card.ringing')), 5000)
+  return 'countdown in the pill, rang, spoke "tea timer is done", stopped'
+})
+
+await scenario('Check off a reminder, remember a fact, turn the volume down', async () => {
+  await talk('Check off renew passport')
+  await until(async () => ((await helper('/state')).reminderDone ?? []).length === 1, 10_000)
+  await overlay.waitForSelector('.reminders-w', { timeout: 10_000 })
+  await reset()
+  await talk('Remember that I parked on level 3, spot B12')
+  await overlay.waitForSelector('.list-meta:has-text("Remembered")', { timeout: 10_000 })
+  await shot('24-remembered')
+  await reset()
+  await talk('Turn the volume down')
+  await until(async () => (await helper('/state')).exec.some((e) => e.script.includes('set volume output volume 45')), 8000)
+  return 'reminder checked off; memory saved; volume 60 → 45'
+})
+
 await scenario('Music: play and pause from the widget', async () => {
   await talk('Play Midnight City')
   await overlay.waitForSelector('.now-playing', { timeout: 10_000 })

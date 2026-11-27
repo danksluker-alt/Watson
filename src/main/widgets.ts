@@ -10,6 +10,7 @@ import { nowPlaying } from './tools/music'
 import { recentNotes, searchNotes } from './tools/notes'
 import { getStock } from './tools/stocks'
 import { getWeather } from './tools/weather'
+import { timers } from './timers'
 
 export type WidgetParams = Record<string, string>
 
@@ -34,6 +35,8 @@ export async function buildWidget(helper: Helper, kind: WidgetKind, params: Widg
       const np = await nowPlaying((params.app as MusicApp) || settings.musicApp)
       return np ? { type: 'nowPlaying', data: np } : null
     }
+    case 'timers':
+      return { type: 'timers', data: { items: timers.list() } }
   }
 }
 
@@ -56,6 +59,8 @@ export function paramsOf(block: Block): { kind: WidgetKind; params: WidgetParams
       return { kind: 'battery', params: {} }
     case 'nowPlaying':
       return { kind: 'nowPlaying', params: { app: block.data.app } }
+    case 'timers':
+      return { kind: 'timers', params: {} }
     default:
       return null
   }
@@ -71,4 +76,5 @@ export const REFRESH: Record<WidgetKind, number> = {
   clock: 3600,
   battery: 120,
   nowPlaying: 5,
+  timers: 5,
 }

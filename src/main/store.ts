@@ -23,6 +23,8 @@ export class Store extends EventEmitter {
     insertTargetName: null,
     agents: [],
     sounds: true,
+    timers: [],
+    ringing: null,
   }
 
   set(patch: Partial<UIState>) {

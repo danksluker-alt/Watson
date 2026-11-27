@@ -7,6 +7,7 @@ import { Markdown } from '../components/Markdown'
 import { DelegationCard } from './Delegation'
 import { NowPlayingWidget } from './NowPlaying'
 import { StockWidget } from './Stock'
+import { TimersWidget } from './Timers'
 import { WeatherWidget } from './Weather'
 
 export function BlockView({ block }: { block: Block }) {
@@ -110,6 +111,8 @@ export function BlockView({ block }: { block: Block }) {
       return <ClockWidget data={block.data} />
     case 'battery':
       return <BatteryWidget data={block.data} />
+    case 'timers':
+      return <TimersWidget data={block.data} />
   }
 }
 

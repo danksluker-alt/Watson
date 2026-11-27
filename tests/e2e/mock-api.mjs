@@ -43,6 +43,10 @@ export function startMockApi(port) {
       const req = text.replace(/^(ask|have|tell) claude( to)?/i, '').trim().replace(/^./, (c) => c.toUpperCase())
       return { tools: [{ name: 'delegate', input: { agent: 'claude', request: req, sensitive: /email|send/.test(t) } }] }
     }
+    if (/\btimer\b/.test(t)) return { tools: [{ name: 'timer', input: { action: 'start', seconds: Number(/(\d+) second/.exec(t)?.[1] ?? 600), label: t.includes('tea') ? 'tea' : undefined } }] }
+    if (t.startsWith('check off')) return { tools: [{ name: 'complete_reminder', input: { title: text.slice(10).replace(/[.?!]$/, '') } }] }
+    if (t.startsWith('remember')) return { tools: [{ name: 'memory', input: { action: 'remember', text: 'Parked on level 3, spot B12' } }] }
+    if (t.includes('volume')) return { tools: [{ name: 'mac', input: { action: 'volume_down' } }] }
     if (t.startsWith('pin ')) {
       const widget = ['weather', 'calendar', 'clock', 'battery', 'reminders', 'stock'].find((w) => t.includes(w)) ?? 'weather'
       return { tools: [{ name: 'pin_widget', input: { action: 'pin', widget, ...(widget === 'clock' ? { cities: ['Tokyo', 'London'] } : {}), screen: t.includes('other') ? 'other' : 'this' } }] }
@@ -71,7 +75,7 @@ export function startMockApi(port) {
     const r = results.map((x) => (typeof x.content === 'string' ? x.content : JSON.stringify(x.content))).join('\n')
     if (results.some((x) => x.is_error)) return `Sorry, that didn't work: ${r.slice(0, 120)}`
     const t = text.toLowerCase()
-    if (t.startsWith('pin ')) return r
+    if (t.startsWith('pin ') || /\btimer\b/.test(t) || t.startsWith('check off') || t.startsWith('remember') || t.includes('volume')) return r.split('. It ends')[0] + '.'
     if (/^(ask|have|tell) (grok|claude)/.test(t)) return r.includes('confirm') ? 'I’ll hand that to Claude as soon as you confirm.' : `I’ve handed that to ${t.includes('grok') ? 'Grok' : 'Claude'}. I’ll tell you what comes back.`
     if (t.includes('weather')) {
       const j = JSON.parse(r)

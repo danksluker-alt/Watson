@@ -47,6 +47,8 @@ const api: WatsonAPI = {
   requestPermissions: () => ipcRenderer.invoke('helper:requestPermissions'),
   openPrivacyPane: (pane) => ipcRenderer.send('helper:openPrivacy', pane),
   testVoice: () => ipcRenderer.send('ui:testVoice'),
+  cancelTimer: (id) => ipcRenderer.send('timer:cancel', id),
+  stopRinging: () => ipcRenderer.send('timer:stopRinging'),
 }
 
 contextBridge.exposeInMainWorld('watson', api)

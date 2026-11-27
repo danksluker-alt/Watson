@@ -7,6 +7,7 @@
 //   - Widgets (weather, stocks, Spotify) are drawn locally from free data;
 //     the model only sees a one-line summary of them.
 import Anthropic from '@anthropic-ai/sdk'
+import { clipboard } from 'electron'
 import { z } from 'zod'
 import type { Block, MusicApp, Panel, Settings, StockRange, WidgetKind } from '@shared/types'
 import type { Helper } from './helper'
@@ -17,10 +18,14 @@ import { getWeather, weatherForModel } from './tools/weather'
 import { getStock, stockForModel } from './tools/stocks'
 import * as music from './tools/music'
 import { openApp, openFile, openUrl } from './tools/system'
-import { addEvent, addReminder, calendarForModel, getCalendar, getReminders, remindersForModel } from './tools/calendar'
+import { addEvent, addReminder, calendarForModel, completeReminder, getCalendar, getReminders, remindersForModel } from './tools/calendar'
+import { macControl, type MacAction } from './tools/mac'
+import { findFiles } from './tools/files'
+import { forget, memories, memoryPrompt, remember } from './memory'
 import { createNote, notesForModel, readNote, recentNotes, searchNotes } from './tools/notes'
 import { clockForModel, worldClock } from './tools/clock'
 import { battery } from './tools/battery'
+import { spokenDuration, timerName, timers } from './timers'
 
 export const HAIKU = 'claude-haiku-5-5'
 export const SONNET = 'claude-sonnet-5-5'
@@ -84,7 +89,21 @@ const RemindersInput = z.object({ list: z.string().optional() })
 const AddReminderInput = z.object({ title: z.string().min(1), due: z.string().optional(), list: z.string().optional() })
 const NotesInput = z.object({ action: z.enum(['recent', 'search', 'read', 'create']), query: z.string().optional(), title: z.string().optional(), body: z.string().optional() })
 const ClockInput = z.object({ cities: z.array(z.string()).max(5) })
-const WIDGETS = ['weather', 'stock', 'calendar', 'reminders', 'notes', 'clock', 'battery', 'now_playing'] as const
+const MacInput = z.object({
+  action: z.enum(['volume', 'volume_up', 'volume_down', 'mute', 'unmute', 'dark_mode', 'light_mode', 'toggle_appearance', 'sleep_display']),
+  level: z.number().optional(),
+})
+const CompleteReminderInput = z.object({ title: z.string().min(1) })
+const MemoryInput = z.object({ action: z.enum(['remember', 'forget', 'list']), text: z.string().optional() })
+const FindInput = z.object({ query: z.string().min(1) })
+const TimerInput = z.object({
+  action: z.enum(['start', 'alarm', 'list', 'cancel']),
+  seconds: z.number().optional(),
+  time: z.string().optional(),
+  label: z.string().optional(),
+  target: z.string().optional(),
+})
+const WIDGETS = ['weather', 'stock', 'calendar', 'reminders', 'notes', 'clock', 'battery', 'now_playing', 'timers'] as const
 const PinInput = z.object({
   action: z.enum(['pin', 'unpin']),
   widget: z.enum([...WIDGETS, 'all']),
@@ -181,6 +200,11 @@ function toolDefs(settings: Settings): Anthropic.Beta.BetaToolUnion[] {
       input_schema: { type: 'object', properties: { title: { type: 'string' }, due: { type: 'string' }, list: { type: 'string' } }, required: ['title'] },
     },
     {
+      name: 'complete_reminder',
+      description: 'Check off (complete) one of the user\'s open reminders by its title or words in it. Shows the updated list.',
+      input_schema: { type: 'object', properties: { title: { type: 'string' } }, required: ['title'] },
+    },
+    {
       name: 'notes',
       description: 'Apple Notes: list recent notes, search them, read one, or create a new note. Draws a notes widget.',
       input_schema: {
@@ -203,6 +227,55 @@ function toolDefs(settings: Settings): Anthropic.Beta.BetaToolUnion[] {
       name: 'battery',
       description: 'Show the Mac\'s battery level and charging state.',
       input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'timer',
+      description:
+        'Timers and alarms on this Mac, with a live countdown widget. When one goes off Watson chimes, says it out loud and shows a notification. start: a countdown (seconds, label?). alarm: at a clock time (time "HH:mm" for the next occurrence, or "YYYY-MM-DDTHH:mm"; label?). list. cancel: target = label, "all", or omit for the soonest.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['start', 'alarm', 'list', 'cancel'] },
+          seconds: { type: 'number', description: 'For start: total length in seconds (10 minutes = 600)' },
+          time: { type: 'string', description: 'For alarm: local time' },
+          label: { type: 'string', description: 'What it is for, e.g. "pasta"' },
+          target: { type: 'string', description: 'For cancel' },
+        },
+        required: ['action'],
+      },
+    },
+    {
+      name: 'mac',
+      description:
+        'Control this Mac: volume (level 0-100), volume_up / volume_down (level = step, default 15), mute, unmute, dark_mode, light_mode, toggle_appearance, sleep_display (also locks if a password is required on wake).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['volume', 'volume_up', 'volume_down', 'mute', 'unmute', 'dark_mode', 'light_mode', 'toggle_appearance', 'sleep_display'] },
+          level: { type: 'number' },
+        },
+        required: ['action'],
+      },
+    },
+    {
+      name: 'memory',
+      description:
+        'Long-term memory on this Mac. remember: save a fact the user tells you to keep (write it as a short self-contained sentence, e.g. "Car is parked on level 3, spot B12 (Nov 27)"). forget: remove memories containing text ("all" for everything). list: show them.',
+      input_schema: {
+        type: 'object',
+        properties: { action: { type: 'string', enum: ['remember', 'forget', 'list'] }, text: { type: 'string' } },
+        required: ['action'],
+      },
+    },
+    {
+      name: 'read_clipboard',
+      description: 'Read the text the user has copied, when they refer to it ("what I copied", "this text", "summarize/translate/reply to this"). Only when asked.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    {
+      name: 'find_files',
+      description: 'Find files and folders on this Mac with Spotlight, by name or content. Shows a list; then use open (kind file) with the path if the user wants it opened.',
+      input_schema: { type: 'object', properties: { query: { type: 'string', description: 'Words in the file name or text, e.g. "tax 2025"' } }, required: ['query'] },
     },
     {
       name: 'pin_widget',
@@ -260,12 +333,18 @@ function systemPrompt(settings: Settings, spoken: boolean): string {
       : 'The user typed this. Reply briefly in plain text.',
     'When an answer is better seen (steps, comparisons, tables, numbers, code), call show_panel and say only one sentence.',
     'Widget tools (weather, stocks, music, calendar, reminders, notes, clock, battery) draw their own widgets; after using them, just say the key fact.',
+    'For "good morning", "brief me" or "how does my day look": call get_weather, get_calendar (today) and get_reminders together, then give a warm 2–3 sentence briefing.',
+    'Use memory to remember things only when the user asks you to remember or note something about themselves; to answer "where did I park" and similar, use what you remember.',
+    'Timers and alarms ("set a timer for 10 minutes", "wake me at 7") use the timer tool; confirm the length or time in a few words.',
     'When the user wants something kept on screen ("pin", "keep it up", "put it on my other screen"), use pin_widget.',
     'Calendar events and reminders you add take effect right away: repeat back what you added.',
     'Use delegate for coding, website changes, email, calendar, documents and anything needing the user\'s connectors. Then say in a few words that you handed it off.',
     'Never claim you did something you did not do. If you are unsure, say so.',
     `Today is ${today}. Home city: ${settings.homeCity}. Units: °${settings.units}.`,
-  ].join('\n')
+    memoryPrompt(),
+  ]
+    .filter(Boolean)
+    .join('\n')
 }
 
 const toolName = (t: Anthropic.Beta.BetaToolUnion) => ('name' in t ? t.name : '')
@@ -546,6 +625,96 @@ export class Brain {
         const b = await battery()
         host.addBlocks([{ type: 'battery', data: b }])
         return b.percent === null ? 'This Mac has no battery (it is on power).' : `${b.percent}%, ${b.state}${b.timeRemaining ? `, ${b.timeRemaining} left` : ''}.`
+      }
+      case 'complete_reminder': {
+        const { title } = CompleteReminderInput.parse(input)
+        const a = host.activity(`Checking off “${title}”`)
+        try {
+          const msg = await completeReminder(host.helper, title)
+          host.addBlocks([{ type: 'reminders', data: await getReminders(host.helper) }])
+          host.finishActivity(a, true)
+          return msg
+        } catch (e) {
+          host.finishActivity(a, false)
+          throw e
+        }
+      }
+      case 'mac': {
+        const { action, level } = MacInput.parse(input)
+        try {
+          return await macControl(action as MacAction, level)
+        } catch (e) {
+          const m = e instanceof Error ? e.message : String(e)
+          if (/not allowed|-1743|assistive/i.test(m)) throw new Error('macOS blocked it. Allow Watson to control "System Events" in System Settings → Privacy & Security → Automation.')
+          throw e
+        }
+      }
+      case 'memory': {
+        const { action, text } = MemoryInput.parse(input)
+        if (action === 'remember') {
+          const m = remember(text ?? '')
+          host.addBlocks([{ type: 'list', items: [{ title: m.text, meta: 'Remembered' }] }], { title: 'Watson will remember' })
+          return `Remembered: ${m.text}`
+        }
+        if (action === 'forget') {
+          const gone = forget(text ?? '')
+          return gone.length ? `Forgot ${gone.length} thing${gone.length === 1 ? '' : 's'}: ${gone.map((g) => g.text).join('; ')}` : 'Nothing matched.'
+        }
+        const all = memories()
+        if (all.length) host.addBlocks([{ type: 'list', items: all.map((m) => ({ title: m.text, meta: new Date(m.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) })) }], { title: 'What Watson remembers' })
+        return all.length ? `${all.length} memories, shown.` : 'Nothing remembered yet.'
+      }
+      case 'read_clipboard': {
+        const text = (await clipboard.readText()).trim()
+        if (!text) return 'The clipboard has no text.'
+        return text.length > 6000 ? `${text.slice(0, 6000)}\n[…clipboard cut at 6000 characters]` : text
+      }
+      case 'find_files': {
+        const { query } = FindInput.parse(input)
+        const a = host.activity(`Searching for “${query}”`)
+        try {
+          const found = await findFiles(query)
+          host.finishActivity(a, true)
+          if (!found.length) return `No files found for "${query}".`
+          const day = (ms: number) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+          host.addBlocks([{ type: 'list', items: found.map((f) => ({ title: f.name, detail: f.folder, meta: `${f.kind} · ${day(f.modified)}` })) }], { title: `Files matching “${query}”` })
+          return JSON.stringify(found.map((f) => ({ name: f.name, path: f.path, modified: day(f.modified) })))
+        } catch (e) {
+          host.finishActivity(a, false)
+          throw e
+        }
+      }
+      case 'timer': {
+        const t = TimerInput.parse(input)
+        const show = (highlight?: string) => host.addBlocks([{ type: 'timers', data: { items: timers.list(), highlight } }])
+        const at = (ms: number) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+        switch (t.action) {
+          case 'start': {
+            const item = timers.start(t.seconds ?? 0, t.label)
+            show(item.id)
+            return `Started ${item.label ? `the ${item.label} timer` : 'a timer'} for ${spokenDuration(item.durationSec)}. It ends at ${at(item.endsAt)}.`
+          }
+          case 'alarm': {
+            const raw = (t.time ?? '').trim()
+            const hm = raw.match(/^(\d{1,2}):(\d{2})$/)
+            const when = hm ? new Date(new Date().setHours(Number(hm[1]), Number(hm[2]), 0, 0)) : new Date(raw)
+            const item = timers.alarm(when, t.label)
+            show(item.id)
+            const day = new Date(item.endsAt).toDateString() === new Date().toDateString() ? 'today' : new Date(item.endsAt).toLocaleDateString('en-US', { weekday: 'long' })
+            return `Alarm set for ${at(item.endsAt)} ${day}${item.label ? ` (${item.label})` : ''}. Watson must be running for it to go off.`
+          }
+          case 'list': {
+            const list = timers.list()
+            show()
+            return list.length ? list.map((x) => `${timerName(x)}: ends ${at(x.endsAt)}`).join('; ') : 'No timers or alarms are running.'
+          }
+          case 'cancel': {
+            const gone = timers.cancel(t.target)
+            if (timers.list().length) show()
+            return gone.length ? `Cancelled ${gone.map(timerName).join(', ')}.` : 'There was no matching timer.'
+          }
+        }
+        return 'Done.'
       }
       case 'pin_widget': {
         const p = PinInput.parse(input)

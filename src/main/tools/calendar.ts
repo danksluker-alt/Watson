@@ -101,6 +101,11 @@ export async function addReminder(helper: Helper, r: { title: string; due?: stri
   return `Added "${r.title}" to ${res.list}${when}.`
 }
 
+export async function completeReminder(helper: Helper, title: string): Promise<string> {
+  const res = await helper.request<{ title: string; list: string }>('reminders.complete', { title }, 60_000)
+  return `Checked off "${res.title}" in ${res.list}.`
+}
+
 export function remindersForModel(r: RemindersData) {
   return {
     count: r.items.length,

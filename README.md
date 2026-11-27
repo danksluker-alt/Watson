@@ -59,7 +59,12 @@ Settings → Voice decides which of the two ⌥ Space does.
 | Weather | Open-Meteo | free |
 | Stocks | Yahoo Finance chart data, with a Stooq fallback | free |
 | Calendar (read, add) | Apple Calendar via EventKit (all your accounts) | free |
-| Reminders (read, add) | Apple Reminders via EventKit | free |
+| Reminders (read, add, check off) | Apple Reminders via EventKit | free |
+| Timers and alarms | Local; a countdown in the pill, a chime, a spoken alert and a notification | free |
+| Mac controls | Volume, mute, dark/light mode, sleep the display | free |
+| Memory | Facts you ask Watson to remember, kept in `memory.json` on this Mac | free |
+| Clipboard | Reads copied text when you ask ("summarize what I copied") | free |
+| Find files | Spotlight (`mdfind`) in your home folder | free |
 | Notes (recent, search, read, create) | Apple Notes via AppleScript | free |
 | World clock | Time zones from Open-Meteo | free |
 | Battery | `pmset` | free |
@@ -127,6 +132,12 @@ This builds `release/mac-arm64/Watson.app` with its icon, signed for your Mac on
 
 ## Things to say
 
+- "Good morning" (weather, calendar and reminders in one short briefing)
+- "Set a pasta timer for 9 minutes" · "Wake me up at 7" · "Cancel the pasta timer"
+- "Turn the volume down" · "Mute" · "Switch to dark mode"
+- "Remember I parked on level 3, spot B12" · "Where did I park?" · "What do you remember?"
+- "Summarize what I copied" · "Translate this to Spanish"
+- "Find my tax return PDF" · "Mark *buy milk* as done"
 - "What's the weather this weekend?" · "How's Tesla doing this month?"
 - "What's on my calendar today?" · "Add lunch with Ana tomorrow at 1"
 - "Remind me to call Mom at 6" · "Show my reminders"

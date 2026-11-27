@@ -81,6 +81,18 @@ export type BatteryData = {
   timeRemaining?: string
 }
 
+export type TimerItem = {
+  id: string
+  kind: 'timer' | 'alarm'
+  /** What it's for ("pasta"); may be empty. */
+  label: string
+  durationSec: number
+  endsAt: number
+  createdAt: number
+}
+
+export type TimersData = { items: TimerItem[]; highlight?: string }
+
 export type DelegationData = {
   jobId: string
   agentId: string
@@ -113,13 +125,14 @@ export type Block =
   | { type: 'notes'; data: NotesData }
   | { type: 'clock'; data: ClockData }
   | { type: 'battery'; data: BatteryData }
+  | { type: 'timers'; data: TimersData }
 
 export type Panel = { title?: string; subtitle?: string; blocks: Block[] }
 
 /** Widgets that can be pinned to a screen. */
-export type WidgetKind = 'weather' | 'stock' | 'calendar' | 'reminders' | 'notes' | 'clock' | 'battery' | 'nowPlaying'
+export type WidgetKind = 'weather' | 'stock' | 'calendar' | 'reminders' | 'notes' | 'clock' | 'battery' | 'nowPlaying' | 'timers'
 
-export const PINNABLE: Block['type'][] = ['weather', 'stock', 'calendar', 'reminders', 'notes', 'clock', 'battery', 'nowPlaying']
+export const PINNABLE: Block['type'][] = ['weather', 'stock', 'calendar', 'reminders', 'notes', 'clock', 'battery', 'nowPlaying', 'timers']
 
 export type PinnedWidget = {
   id: string
@@ -164,6 +177,10 @@ export type UIState = {
   insertTargetName: string | null
   agents: { id: string; name: string }[]
   sounds: boolean
+  /** Running timers and alarms, soonest first (the pill shows the next one). */
+  timers: TimerItem[]
+  /** A timer or alarm that just went off and hasn't been dismissed. */
+  ringing: TimerItem | null
 }
 
 // ---------- Settings ----------
@@ -254,4 +271,6 @@ export type WatsonAPI = {
   requestPermissions: () => Promise<PermissionStatus | null>
   openPrivacyPane: (pane: 'Microphone' | 'SpeechRecognition' | 'Accessibility' | 'Automation' | 'Calendars' | 'Reminders') => void
   testVoice: () => void
+  cancelTimer: (id: string) => void
+  stopRinging: () => void
 }

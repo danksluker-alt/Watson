@@ -35,7 +35,7 @@ function tone(freq: number, start: number, dur: number, gain = 0.07, type: Oscil
   osc2.stop(t + dur + 0.05)
 }
 
-export type Sound = 'listen' | 'done-listening' | 'sent' | 'arrived' | 'error'
+export type Sound = 'listen' | 'done-listening' | 'sent' | 'arrived' | 'error' | 'ring'
 
 export function play(sound: Sound) {
   try {
@@ -55,6 +55,11 @@ export function play(sound: Sound) {
         tone(784, 0, 0.18, 0.06)
         tone(988, 0.09, 0.18, 0.06)
         tone(1318.5, 0.18, 0.32, 0.06)
+        break
+      case 'ring':
+        // A bright three-note bell, like the Clock app's "Radial" but shorter.
+        for (const [i, f] of [1046.5, 1318.5, 1568].entries()) tone(f, i * 0.16, 0.55, 0.09)
+        tone(2093, 0.48, 0.7, 0.05)
         break
       case 'error':
         tone(330, 0, 0.18, 0.06, 'triangle')
