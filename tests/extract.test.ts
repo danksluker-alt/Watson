@@ -43,3 +43,36 @@ test('picks the browser window that holds the conversation', () => {
   assert.equal(r.busy, true)
   assert.equal(r.reply, '2 + 2 = 4, which is 100 in binary.')
 })
+
+// ---------- Built from real Claude desktop app snapshots (see tests/fixtures) ----------
+
+import fs from 'node:fs'
+import { joinInline } from '../src/main/extract.ts'
+
+const real = JSON.parse(fs.readFileSync(new URL('./fixtures/claude-chat-ready.json', import.meta.url), 'utf8'))
+
+test('real Claude chat: reads just the reply, without screen-reader copies or the footer', () => {
+  const r = replyFromWindows([real.before], [real.after], real.prompt)
+  assert.equal(r.found, true)
+  assert.equal(r.reply, 'ready')
+  assert.equal(r.busy, false)
+})
+
+test('real Claude chat: an answer still being written', () => {
+  // Mid-answer, Claude shows "Claude is responding" (the helper turns that into busy) and part of the text.
+  const upToPrompt = real.after.lines.slice(0, real.after.lines.lastIndexOf(real.prompt) + 1)
+  const partial = { ...real.after, busy: true, lines: [...upToPrompt, 'rea'] }
+  const r = replyFromWindows([real.before], [partial], real.prompt)
+  assert.equal(r.reply, 'rea')
+  assert.equal(r.busy, true)
+})
+
+test('rejoins paragraphs that the app split at bold words and links', () => {
+  const lines = ['What you should see:', 'A dialog asks for access. Click', 'Open System Settings', '.', 'Under Accessibility there should now be a single', 'Watson', 'entry, switched off. Turn it', 'on', 'and confirm with Touch ID.', '1. Save your work.']
+  assert.deepEqual(joinInline(lines), [
+    'What you should see:',
+    'A dialog asks for access. Click Open System Settings.',
+    'Under Accessibility there should now be a single Watson entry, switched off. Turn it on and confirm with Touch ID.',
+    '1. Save your work.',
+  ])
+})

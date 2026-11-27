@@ -27,7 +27,8 @@ export type StartOptions = {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
-const RISKY = /\b(send|reply|forward|post|publish|tweet|delete|remove|trash|cancel|buy|purchase|order|pay|transfer|merge|deploy|push)\b/i
+// "Reply with one word" is an instruction to the AI; "reply to Sarah" sends something.
+const RISKY = /\b(send|reply (to|all)|forward|post|publish|tweet|delete|remove|trash|cancel|buy|purchase|order|pay|transfer|merge|deploy|push)\b/i
 
 export function findAgent(idOrName: string): AgentTarget | undefined {
   const q = idOrName.trim().toLowerCase()
@@ -68,7 +69,7 @@ export class Delegations {
     this.deps.store.set({ jobs: [...this.deps.store.state.jobs.slice(-4), job] })
     void this.run(jobId, agent, prompt, needsConfirm, opts.newChat ?? true)
     const note = needsConfirm
-      ? `Waiting for the user to confirm before sending to ${agent.name}. Ask them to say "send" or press Send.`
+      ? `Not sent yet: nothing has been typed into ${agent.name}. Watson is showing the request with a Send button in its own panel. Ask the user to say "send" or press Send there.`
       : `Sent to ${agent.name}. Its answer will be summarized for the user when it arrives. Just tell them you've handed it to ${agent.name}.`
     return { note, job }
   }
@@ -108,6 +109,7 @@ export class Delegations {
             url: agent.kind === 'web' ? agent.url : undefined,
             browser: settings.browserBundleId,
             newChat,
+            chatMenu: agent.kind === 'app' ? agent.chatMenu : undefined,
             text: prompt,
             submit: true,
             returnFocus: settings.returnFocusAfterHandoff,

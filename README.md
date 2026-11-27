@@ -154,7 +154,10 @@ This builds `release/mac-arm64/Watson.app` with its icon, signed for your Mac on
 1. The brain picks the agent and writes a clean prompt, or you write it yourself in review mode.
 2. Requests that send, delete, buy or publish need your OK first.
 3. The helper sends the text:
-   - **App agents:** it brings the app forward, optionally presses ⌘N for a new chat, focuses the message box, pastes and presses Return.
+   - **App agents:** it brings the app forward, opens a new chat through the app's own menu
+     ("New Chat"; for Claude it first picks Go → Claude, because ⌘N in Claude's Code view starts a
+     coding session), focuses the message box, pastes and presses Return. If it can't find the
+     message box it sends nothing and says so.
    - **Website agents:** it opens the chat URL in your default browser, waits for the message box, pastes and presses Return.
    - Then it puts your clipboard back and returns you to the app you were in.
 4. Watson reads the app's windows through Accessibility. It finds the window holding your prompt

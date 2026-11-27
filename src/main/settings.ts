@@ -7,7 +7,8 @@ import path from 'node:path'
 import type { AgentTarget, SecretName, SecretStatus, Settings } from '@shared/types'
 
 export const AGENT_PRESETS: AgentTarget[] = [
-  { id: 'claude', name: 'Claude', kind: 'app', bundleId: 'com.anthropic.claudefordesktop', enabled: true },
+  // Claude's app also has a Code view where ⌘N starts a coding session: switch to chat first.
+  { id: 'claude', name: 'Claude', kind: 'app', bundleId: 'com.anthropic.claudefordesktop', chatMenu: ['Go', 'Claude'], enabled: true },
   { id: 'grok', name: 'Grok', kind: 'web', url: 'https://grok.com/', enabled: true },
   { id: 'chatgpt', name: 'ChatGPT', kind: 'app', bundleId: 'com.openai.chat', enabled: false },
   { id: 'gemini', name: 'Gemini', kind: 'web', url: 'https://gemini.google.com/app', enabled: false },
@@ -77,7 +78,11 @@ export function getSettings(): Settings {
     const saved = readJson<Partial<Settings>>('settings.json', {})
     cached = { ...DEFAULT_SETTINGS, ...saved }
     // Older settings files have agents without a kind; newer presets may be missing.
-    const agents = (saved.agents ?? AGENT_PRESETS).map((a) => ({ ...a, kind: a.kind ?? 'app' }) as AgentTarget)
+    // Saved presets pick up new preset fields (like chatMenu) without losing the user's choices.
+    const agents = (saved.agents ?? AGENT_PRESETS).map((a) => {
+      const preset = AGENT_PRESETS.find((p) => p.id === a.id)
+      return { ...(preset ? { chatMenu: preset.chatMenu } : {}), ...a, kind: a.kind ?? 'app' } as AgentTarget
+    })
     for (const preset of AGENT_PRESETS) if (!agents.some((a) => a.id === preset.id)) agents.push({ ...preset, enabled: false })
     cached.agents = agents
   }

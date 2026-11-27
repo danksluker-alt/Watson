@@ -192,6 +192,8 @@ export type AgentTarget = {
   kind: 'app' | 'web'
   bundleId?: string
   url?: string
+  /** Menu path that switches the app to plain chat before "New Chat", e.g. ["Go", "Claude"]. */
+  chatMenu?: string[]
   enabled: boolean
 }
 

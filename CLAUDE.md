@@ -34,3 +34,10 @@
 - Diagnostics in the helper: `audio.probe` (tries engine set-ups) and `echo.test` (speaks a
   sentence while recognizing the mic, `vp` on/off). Never add a probe set-up that can hang:
   killing a hung `engine.start()` wedged coreaudiod until the Mac was restarted.
+- Hand-offs (Claude desktop, checked on the real app): Chromium apps return an empty AX tree on
+  the first read after `AXManualAccessibility` is set, so the helper retries. Busy = a "Stop" control
+  or status text like "Claude is responding". New chat goes through named menu items
+  (`AgentTarget.chatMenu`, then "New Chat"), never a blind ⌘N. No message box found = nothing is
+  pasted. Each message also appears as a screen-reader copy ("You said: …"); `extract.ts` drops
+  those and rejoins text split at bold words. Fixture: `tests/fixtures/claude-chat-ready.json`.
+- `ax.menus` lists an app's menu items and shortcuts (read-only) when adding a new app agent.

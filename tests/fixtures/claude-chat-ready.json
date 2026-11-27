@@ -1,0 +1,34 @@
+{
+  "_about": "Real Accessibility snapshot of the Claude desktop app (Chat view, macOS 27, Nov 2026) after Watson sent a test prompt. Captured with the helper's ax.snapshot; contains no personal data. Long screen-reader hints are shortened.",
+  "app": "com.anthropic.claudefordesktop",
+  "prompt": "Reply with just the word \"ready\", and nothing else.",
+  "before": {
+    "title": "Claude",
+    "busy": false,
+    "lines": [
+      "Claude",
+      "Navigation",
+      "How can I help you today?"
+    ]
+  },
+  "after": {
+    "title": "Claude",
+    "busy": false,
+    "lines": [
+      "Claude",
+      "Navigation",
+      "Newest document available to open — press Tab until focus en",
+      "Newest document available to open — press Tab until focus en",
+      "Newest document available to open — press Tab until focus en",
+      "Newest document available to open — press Tab until focus en",
+      "Newest document available to open — press Tab until focus en",
+      "Use the up and down arrow keys to move between messages.",
+      "You said: Reply with just the word \"ready\", and nothing else.",
+      "Reply with just the word \"ready\", and nothing else.",
+      "Claude responded: ready",
+      "ready",
+      "Claude is AI and can make mistakes.",
+      "Claude finished the response"
+    ]
+  }
+}

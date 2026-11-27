@@ -10,12 +10,46 @@ const CHROME = [
   /^chatgpt can make mistakes/i,
   /^grok can make mistakes/i,
   /^(reply to claude|message chatgpt|ask anything|ask grok|how can i help)/i,
-  /^(sonnet|opus|haiku|fable) [\d.]+$/i,
+  /^(claude )?(sonnet|opus|haiku|fable) [\d.]+( (low|medium|high|max|extended))?$/i,
+  /^(chat mode|this computer|loading\.*|navigation)$/i,
+  /^claude is ai and can make mistakes/i,
+  /^\w+ (finished|stopped) the response$/i,
+  /^newest document available to open/i,
+  /^use the up and down arrow keys/i,
   /^\d{1,2}:\d{2}( ?[ap]m)?$/i,
 ]
 
+// Screen-reader copies of each message ("You said: …", "Claude responded: …"); the visible copy follows.
+const SPOKEN_COPY = /^(you said|claude responded|chatgpt said|grok said|assistant said):\s/i
+
 export function cleanLines(lines: string[]): string[] {
-  return lines.map((l) => l.trim()).filter((l) => l && !CHROME.some((re) => re.test(l)))
+  return lines.map((l) => l.trim()).filter((l) => l && !SPOKEN_COPY.test(l) && !CHROME.some((re) => re.test(l)))
+}
+
+/**
+ * Apps split a paragraph at bold words and links ("Click" / "Open Settings" / "."). Join pieces back
+ * into sentences: punctuation-only pieces always attach; other pieces attach when the line before
+ * doesn't end a sentence and either side is a short fragment or the piece starts in lowercase.
+ */
+export function joinInline(lines: string[]): string[] {
+  const out: string[] = []
+  const words = (s: string) => s.split(/\s+/).filter(Boolean).length
+  for (const line of lines) {
+    const prev = out[out.length - 1]
+    if (prev !== undefined) {
+      if (/^[.,;:!?)\]”’"'…]+$/.test(line)) {
+        out[out.length - 1] = prev + line
+        continue
+      }
+      const open = !/[.!?:…]["”’)]?$/.test(prev) && !/^(#|[-*•]|\d+[.)])\s/.test(line)
+      if (open && (/^[a-z,;)]/.test(line) || words(line) <= 3 || words(prev) <= 3)) {
+        out[out.length - 1] = `${prev}${/^[,;:.)]/.test(line) ? '' : ' '}${line}`
+        continue
+      }
+    }
+    out.push(line)
+  }
+  return out
 }
 
 /**
@@ -46,13 +80,13 @@ export function findReply(before: string[], after: string[], prompt: string): { 
         break
       }
     }
-    return { found: true, reply: lines.slice(end + 1).join('\n').trim() }
+    return { found: true, reply: joinInline(lines.slice(end + 1)).join('\n').trim() }
   }
 
   // Fallback: anything that wasn't on screen before.
   const seen = new Set(cleanLines(before).map(norm))
   const fresh = lines.filter((l) => !seen.has(norm(l)) && !p.includes(norm(l)))
-  return { found: false, reply: fresh.join('\n').trim() }
+  return { found: false, reply: joinInline(fresh).join('\n').trim() }
 }
 
 export function extractReply(before: string[], after: string[], prompt: string): string {

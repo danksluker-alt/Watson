@@ -545,6 +545,93 @@ enum AX {
     }
 
     static let inlineRoles: Set<String> = ["AXStaticText", "AXLink", "AXImage"]
+    static let controlRoles: Set<String> = ["AXButton", "AXPopUpButton", "AXMenuButton", "AXCheckBox", "AXRadioButton", "AXComboBox", "AXSlider", "AXMenu", "AXMenuBar", "AXMenuItem", "AXDisclosureTriangle"]
+
+    /// Presses a menu item by path, e.g. ["Go", "Claude"]. Titles match case-insensitively.
+    @discardableResult
+    static func pressMenu(_ app: AXUIElement, _ path: [String]) -> Bool {
+        guard path.count >= 2, let bar = attr(app, kAXMenuBarAttribute) else { return false }
+        guard let top = children(bar as! AXUIElement).first(where: { (string($0, kAXTitleAttribute) ?? "").caseInsensitiveCompare(path[0]) == .orderedSame }) else { return false }
+        var items = children(top).flatMap { children($0) }
+        for (i, name) in path.dropFirst().enumerated() {
+            guard let item = items.first(where: { (string($0, kAXTitleAttribute) ?? "").caseInsensitiveCompare(name) == .orderedSame }) else { return false }
+            if i == path.count - 2 {
+                if (attr(item, kAXEnabledAttribute) as? Bool) == false { return false }
+                return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success
+            }
+            items = children(item).flatMap { children($0) }
+        }
+        return false
+    }
+
+    /// The first enabled menu item whose title matches, anywhere in the menu bar.
+    static func findMenuItem(_ app: AXUIElement, matching pattern: String) -> AXUIElement? {
+        guard let bar = attr(app, kAXMenuBarAttribute) else { return nil }
+        for top in children(bar as! AXUIElement) {
+            for item in children(top).flatMap({ children($0) }) {
+                let t = string(item, kAXTitleAttribute) ?? ""
+                if t.range(of: pattern, options: [.regularExpression, .caseInsensitive]) != nil, (attr(item, kAXEnabledAttribute) as? Bool) != false {
+                    return item
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Opens a new conversation through the app's own menu ("New Chat"), never a blind ⌘N:
+    /// in some apps ⌘N means something else (in Claude's Code view it starts a coding session).
+    static func startNewChat(_ app: AXUIElement, chatMenu: [String]?) -> Bool {
+        if let chatMenu, !chatMenu.isEmpty {
+            if pressMenu(app, chatMenu) { usleep(900_000) } else { log("Menu \(chatMenu.joined(separator: " → ")) not found.") }
+        }
+        if let item = findMenuItem(app, matching: #"^new (chat|conversation|thread)\b"#) {
+            return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success
+        }
+        log("No New Chat menu item; using the open conversation.")
+        return false
+    }
+
+    /// Waits for a window's message box. Chromium apps build their accessibility tree lazily,
+    /// so the first look right after switching it on often finds nothing.
+    static func waitForInput(_ bundleId: String, seconds: Double) -> AXUIElement? {
+        let start = Date()
+        while Date().timeIntervalSince(start) < seconds {
+            if let pair = appElement(bundleId), let window = mainWindow(pair.1), let input = findInput(window) { return input }
+            usleep(350_000)
+        }
+        return nil
+    }
+
+    static func focus(_ input: AXUIElement) -> Bool {
+        AXUIElementSetAttributeValue(input, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        usleep(150_000)
+        return (attr(input, kAXFocusedAttribute) as? Bool) ?? true
+    }
+
+    /// The app's menu bar: each menu with its items and their ⌘ shortcuts. Read-only.
+    static func menus(_ app: AXUIElement) -> [[String: Any]] {
+        guard let bar = attr(app, kAXMenuBarAttribute) else { return [] }
+        return children(bar as! AXUIElement).compactMap { top -> [String: Any]? in
+            let title = string(top, kAXTitleAttribute) ?? ""
+            let items = children(top).flatMap { children($0) }.compactMap { item -> String? in
+                let t = string(item, kAXTitleAttribute) ?? ""
+                if t.isEmpty { return nil }
+                let ch = string(item, "AXMenuItemCmdChar") ?? ""
+                let mods = (attr(item, "AXMenuItemCmdModifiers") as? Int) ?? 0
+                // Modifier bits: 1 shift, 2 option, 4 control, 8 = no command.
+                var keys = ""
+                if !ch.isEmpty {
+                    if mods & 4 != 0 { keys += "⌃" }
+                    if mods & 2 != 0 { keys += "⌥" }
+                    if mods & 1 != 0 { keys += "⇧" }
+                    if mods & 8 == 0 { keys += "⌘" }
+                    keys += ch
+                }
+                return keys.isEmpty ? t : "\(t) [\(keys)]"
+            }
+            return ["menu": title, "items": items]
+        }
+    }
 
     /// Visible text of a window as lines, plus whether a "Stop" button suggests the app is still generating.
     static func snapshot(_ window: AXUIElement, deadline: Date) -> (lines: [String], busy: Bool) {
@@ -555,17 +642,21 @@ enum AX {
             visited += 1
             if visited > 40_000 || depth > 90 || Date() > deadline { return [] }
             let role = string(el, kAXRoleAttribute) ?? ""
-            if role == "AXButton" {
+            if controlRoles.contains(role) {
                 let label = [string(el, kAXDescriptionAttribute), string(el, kAXTitleAttribute), string(el, kAXHelpAttribute)]
                     .compactMap { $0 }.joined(separator: " ").lowercased()
                 if label.contains("stop") { busy = true }
-                return []
+                return [] // buttons, model pickers and menus aren't part of a reply
             }
             if role == "AXTextArea" || role == "AXTextField" || role == "AXSearchField" || role == "AXToolbar" || role == "AXTabGroup" {
                 return [] // skip input boxes and browser chrome
             }
             if role == "AXStaticText" {
                 let v = (string(el, kAXValueAttribute) ?? string(el, kAXTitleAttribute) ?? "")
+                // Claude shows "Claude is responding" while it writes; other apps say "Thinking…".
+                if v.count < 60, v.range(of: #"^\w+ is (responding|thinking|writing|typing)|^(thinking|generating|searching)…?$"#, options: [.regularExpression, .caseInsensitive]) != nil {
+                    busy = true
+                }
                 return v.isEmpty ? [] : [v]
             }
             let kids = children(el)
@@ -675,7 +766,7 @@ enum AX {
 
     /// Bring an app (or a chat website in the browser) forward, focus its message box,
     /// paste the text and optionally press Return. Returns the bundle id that received it.
-    static func sendPrompt(bundleId: String?, url: String?, browser: String?, newChat: Bool, text: String, submit: Bool, returnFocus: Bool) throws -> String {
+    static func sendPrompt(bundleId: String?, url: String?, browser: String?, newChat: Bool, chatMenu: [String]?, text: String, submit: Bool, returnFocus: Bool) throws -> String {
         try requireTrust()
         let previous = frontmost()?.bundleId
         var target: String
@@ -687,32 +778,25 @@ enum AX {
             if newChat { run("/usr/bin/open", ["-b", b, url]) } else { run("/usr/bin/open", ["-b", b]) }
             try waitFront(b, seconds: 12)
             // Wait for the page's message box to exist (the page may still be loading).
-            let start = Date()
-            var focused = false
-            while Date().timeIntervalSince(start) < (newChat ? 15 : 3) {
-                if let pair = appElement(b), let window = mainWindow(pair.1), let input = findInput(window) {
-                    usleep(newChat ? 900_000 : 150_000) // let the page finish wiring up the box
-                    AXUIElementSetAttributeValue(input, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-                    focused = true
-                    break
-                }
-                usleep(400_000)
+            guard let input = waitForInput(b, seconds: newChat ? 15 : 5) else {
+                throw NSError(domain: "watson", code: 14, userInfo: [NSLocalizedDescriptionKey: "I couldn't find the chat's message box in your browser, so nothing was sent. Is the page signed in?"])
             }
-            if !focused { log("No message box found in \(b); pasting into whatever has focus.") }
+            usleep(newChat ? 900_000 : 150_000) // let the page finish wiring up the box
+            _ = focus(input)
             usleep(200_000)
         } else if let bundleId, !bundleId.isEmpty {
             target = bundleId
             run("/usr/bin/open", ["-b", bundleId])
             try waitFront(bundleId, seconds: 12)
             usleep(700_000)
-            if newChat {
-                key(45, flags: .maskCommand) // Cmd+N: new chat in Claude, ChatGPT and most chat apps
+            _ = waitForInput(bundleId, seconds: 3) // wakes up the app's accessibility tree
+            if newChat, let pair = appElement(bundleId), startNewChat(pair.1, chatMenu: chatMenu) {
                 usleep(900_000)
             }
-            if let pair = appElement(bundleId), let window = mainWindow(pair.1), let input = findInput(window) {
-                AXUIElementSetAttributeValue(input, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-                usleep(150_000)
+            guard let input = waitForInput(bundleId, seconds: 6) else {
+                throw NSError(domain: "watson", code: 15, userInfo: [NSLocalizedDescriptionKey: "I couldn't find the app's message box, so nothing was sent."])
             }
+            _ = focus(input)
         } else {
             throw NSError(domain: "watson", code: 13, userInfo: [NSLocalizedDescriptionKey: "That agent has no app or website set."])
         }
@@ -1108,12 +1192,27 @@ func handle(_ msg: [String: Any]) {
         axQueue.async {
             guard AXIsProcessTrusted() else { reply(id, ok: false, error: "Accessibility permission is off."); return }
             guard let pair = AX.appElement(bundleId) else { reply(id, ok: false, error: "That app isn't open."); return }
-            let deadline = Date().addingTimeInterval(3.5)
-            let wins = AX.windows(pair.1).prefix(4).map { w -> [String: Any] in
-                let snap = AX.snapshot(w, deadline: deadline)
-                return ["title": AX.string(w, kAXTitleAttribute) ?? "", "lines": snap.lines, "busy": snap.busy]
+            func read() -> [[String: Any]] {
+                let deadline = Date().addingTimeInterval(3.5)
+                return AX.windows(pair.1).prefix(4).map { w -> [String: Any] in
+                    let snap = AX.snapshot(w, deadline: deadline)
+                    return ["title": AX.string(w, kAXTitleAttribute) ?? "", "lines": snap.lines, "busy": snap.busy]
+                }
             }
-            reply(id, data: ["windows": Array(wins)])
+            var wins = read()
+            // Chromium apps fill their tree a moment after accessibility is switched on.
+            if wins.allSatisfy({ ($0["lines"] as? [String])?.isEmpty ?? true }) {
+                usleep(900_000)
+                wins = read()
+            }
+            reply(id, data: ["windows": wins])
+        }
+    case "ax.menus":
+        let bundleId = msg["bundleId"] as? String ?? ""
+        axQueue.async {
+            guard AXIsProcessTrusted() else { reply(id, ok: false, error: "Accessibility permission is off."); return }
+            guard let pair = AX.appElement(bundleId) else { reply(id, ok: false, error: "That app isn't open."); return }
+            reply(id, data: AX.menus(pair.1))
         }
     case "ax.send":
         let text = msg["text"] as? String ?? ""
@@ -1124,6 +1223,7 @@ func handle(_ msg: [String: Any]) {
                     url: msg["url"] as? String,
                     browser: msg["browser"] as? String,
                     newChat: msg["newChat"] as? Bool ?? false,
+                    chatMenu: msg["chatMenu"] as? [String],
                     text: text,
                     submit: msg["submit"] as? Bool ?? true,
                     returnFocus: msg["returnFocus"] as? Bool ?? true)
