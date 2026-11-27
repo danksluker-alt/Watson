@@ -1,0 +1,61 @@
+# Builds Watson on a real Apple Silicon Mac in GitHub Actions and publishes the
+# app as a download on the "latest" release, so nobody needs a terminal.
+name: Build Mac app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-mac
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Check types and unit tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Build the Swift helper
+        run: npm run helper
+
+      - name: Build the app
+        run: |
+          npm run build
+          npx electron-builder --mac --arm64 --dir --publish never
+          bash scripts/sign-adhoc.sh
+
+      - name: Zip
+        run: ditto -c -k --sequesterRsrc --keepParent release/mac-arm64/Watson.app Watson-mac.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Watson-mac
+          path: Watson-mac.zip
+
+      - name: Publish the download
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest Watson-mac.zip \
+            --title "Watson — latest build" \
+            --notes "Built from ${GITHUB_SHA::7}. Download Watson-mac.zip, open it, and drag Watson to Applications. The first time, macOS will block it: open System Settings → Privacy & Security and click Open Anyway." \
+            --latest

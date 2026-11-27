@@ -1,0 +1,37 @@
+# Runs the unit tests and the end-to-end scenarios (real app, fake native
+# helper, mock Claude API) on every push.
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: |
+          npm ci
+          npm install --no-save playwright
+
+      - name: Types and unit tests
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: End-to-end scenarios
+        run: npm run build && xvfb-run -a node tests/e2e/run.mjs screenshots/e2e
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: screenshots/e2e

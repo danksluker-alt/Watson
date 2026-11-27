@@ -12,6 +12,19 @@ website in your browser. That covers coding, changing your website, or anything 
 their Gmail, Calendar or Drive connectors. Watson watches for the answer and reads you a short
 summary. The work runs on that service's own plan, not on Watson's API key.
 
+## Install (no terminal needed)
+
+1. Open this repository's **Releases** page and download **Watson-mac.zip** from "Watson — latest build".
+   GitHub builds it automatically on a Mac every time the code changes.
+2. Open the zip and drag **Watson** into **Applications**.
+3. Open Watson. macOS blocks apps from outside the App Store the first time: go to **System Settings →
+   Privacy & Security**, scroll down, and click **Open Anyway** next to Watson.
+4. Watson opens Settings: paste your Anthropic API key and allow the permissions it asks for.
+   Its icon lives in the menu bar; the pill sits at the top of your screen.
+
+Each new build has a new signature, so macOS may ask for permissions again after an update.
+(A paid Apple Developer account would remove that and the "Open Anyway" step.)
+
 ## Two ways to talk
 
 | | How | What happens |
@@ -73,7 +86,7 @@ Notes, pmset, Spotify or Music) and draws its own widgets in the same style.
   delete events, reminders or notes.
 - Keys are typed into Settings and encrypted with macOS Keychain.
 
-## Setup on your Mac (Apple Silicon)
+## Developing on your Mac (Apple Silicon)
 
 You need Node 20+ and the Swift compiler. If you don't have Xcode, run `xcode-select --install`.
 
