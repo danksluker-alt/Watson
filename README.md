@@ -19,8 +19,11 @@ makes `release/mac-arm64/Watson.app`, which goes in **Applications**. Its icon l
 bar; the pill sits at the top of your screen. The first launch opens Settings: paste your
 Anthropic API key and allow the permissions it asks for.
 
-Each new build has a new signature, so macOS may ask for permissions again after an update.
-(A paid Apple Developer account would remove that.)
+Builds are signed with your free **Apple Development** certificate when you have one (Xcode →
+Settings → Accounts, with any Apple ID), so macOS keeps Watson's permissions across rebuilds.
+Without one the build is signed ad hoc and macOS asks for permissions again after each rebuild.
+
+Watson writes a log to `~/Library/Logs/Watson/watson.log` (no keys or conversation text).
 
 The GitHub Actions workflows in `.github/workflows` only run when started by hand
 (Actions → Run workflow); pushes don't trigger them.
@@ -119,9 +122,8 @@ The first run opens Settings:
 npm run dist
 ```
 
-This builds `release/mac-arm64/Watson.app` with its icon, signed for your Mac only. Drag it
-to Applications. macOS asks for permissions again for the built app, and again after each
-rebuild, because each build has a new signature.
+This builds `release/mac-arm64/Watson.app` with its icon, signed for your Mac only
+(`scripts/sign-identity.sh` picks the certificate). Drag it to Applications.
 
 ## Things to say
 

@@ -5,6 +5,7 @@ import { Brain, BudgetError, type ToolHost } from './brain'
 import { Delegations } from './delegate'
 import { Helper, type HelperEvent } from './helper'
 import { PinnedWidgets } from './pinned'
+import { installFileLog } from './log'
 import { getSettings, secretStatus, setSecret, updateSettings } from './settings'
 import { Speaker } from './speaker'
 import { Store } from './store'
@@ -254,7 +255,9 @@ function startListening(kind: 'fresh' | 'watch') {
     return
   }
   listening = true
+  console.log(`[watson] listen.start (${kind}, ${store.state.capture})`)
   helper.request('listen.start', { silence: store.state.capture === 'review' ? 1.8 : 1.1 }).catch((e: Error) => {
+    console.error('[watson] listen.start failed:', e.message)
     listening = false
     store.set({ phase: 'idle', error: e.message, expanded: true })
   })
@@ -374,6 +377,7 @@ function onHelperEvent(e: HelperEvent) {
       if (!e.stopped) afterSpeech()
       break
     case 'error':
+      console.error('[helper] error:', e.message)
       store.set({ error: e.message })
       break
   }
@@ -753,6 +757,7 @@ function registerIpc() {
   ipcMain.handle('secrets:status', () => secretStatus())
   ipcMain.handle('secrets:set', (_e, name: SecretName, value: string) => {
     const status = setSecret(name, String(value))
+    console.log(`[watson] key ${name} ${status[name] ? 'saved' : 'cleared'}`)
     store.set({ hasApiKey: status.anthropic })
     return status
   })
@@ -780,6 +785,7 @@ function registerIpc() {
 
 app.whenReady().then(() => {
   app.setName('Watson')
+  installFileLog()
   if (process.platform === 'darwin') app.dock?.hide()
   // Without an Edit menu, Cmd+C / Cmd+V don't work in text fields on macOS.
   Menu.setApplicationMenu(
@@ -795,7 +801,10 @@ app.whenReady().then(() => {
   registerHotkeys()
   syncFromSettings(getSettings())
   helper.on('event', onHelperEvent)
-  helper.on('exit', () => store.set({ helperReady: false }))
+  helper.on('exit', (code) => {
+    console.warn('[watson] helper exited with code', code)
+    store.set({ helperReady: false })
+  })
   helper.start()
   pinned.restore()
   const keys = secretStatus()

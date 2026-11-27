@@ -70,6 +70,7 @@ function Toggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void 
 
 function SecretField({ name, saved, placeholder, onSaved }: { name: SecretName; saved: boolean; placeholder: string; onSaved: (s: SecretStatus) => void }) {
   const [value, setValue] = useState('')
+  const [error, setError] = useState('')
   const [editing, setEditing] = useState(!saved)
   useEffect(() => setEditing(!saved), [saved])
   if (!editing) {
@@ -87,8 +88,14 @@ function SecretField({ name, saved, placeholder, onSaved }: { name: SecretName; 
       className="secret"
       onSubmit={async (e) => {
         e.preventDefault()
-        onSaved(await window.watson.setSecret(name, value))
-        setValue('')
+        setError('')
+        try {
+          onSaved(await window.watson.setSecret(name, value))
+          setValue('')
+        } catch (err) {
+          // Electron wraps errors from the main process; keep only the readable part.
+          setError(String(err instanceof Error ? err.message : err).replace(/^Error invoking remote method '[^']+': (Error: )?/, ''))
+        }
       }}
     >
       <input type="password" value={value} onChange={(e) => setValue(e.target.value)} placeholder={placeholder} autoComplete="off" spellCheck={false} />
@@ -99,6 +106,11 @@ function SecretField({ name, saved, placeholder, onSaved }: { name: SecretName; 
         <button type="button" className="link" onClick={() => setEditing(false)}>
           Cancel
         </button>
+      )}
+      {error && (
+        <span className="perm" role="alert">
+          <Warning size={12} /> {error}
+        </span>
       )}
     </form>
   )

@@ -23,3 +23,9 @@
   `workflow_dispatch` only, so pushes to main don't start them.
 - Keep the checkout out of iCloud Drive (Desktop/Documents sync): offloaded "dataless" files in
   `node_modules` make Node and Electron hang at startup. The owner's checkout is `~/Developer/Watson`.
+- Signing: `scripts/sign-identity.sh` picks `$WATSON_SIGN_IDENTITY`, else the owner's free
+  "Apple Development" cert, else ad hoc. A stable identity keeps TCC permissions across rebuilds.
+- Log: `~/Library/Logs/Watson/watson.log` (tests write into their temp profile instead). Log
+  states and errors only, never keys or conversation text.
+- If echo cancellation (voice processing) fails to start, the helper falls back to the plain mic
+  (`voiceProcessingFailed`) and logs it.

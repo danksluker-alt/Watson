@@ -14,5 +14,5 @@ swiftc -O -swift-version 5 \
   -o helper/build/watson-helper \
   -framework AppKit -framework AVFoundation -framework Speech -framework EventKit -framework ApplicationServices \
   -Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker helper/Info.plist
-codesign --force --sign - helper/build/watson-helper
+codesign --force --sign "$(bash scripts/sign-identity.sh)" helper/build/watson-helper
 echo "Built helper/build/watson-helper"

@@ -55,8 +55,11 @@ final class Locked<T> {
 // MARK: - Voice: microphone, recognition, speech
 
 final class Voice: NSObject, AVSpeechSynthesizerDelegate {
-    let engine = AVAudioEngine()
-    let player = AVAudioPlayerNode()
+    var engine = AVAudioEngine()
+    var player = AVAudioPlayerNode()
+    var configObserver: NSObjectProtocol?
+    /// Set when voice processing (echo cancellation) failed to start on this Mac; we then use the plain mic.
+    var voiceProcessingFailed = false
     let playFormat = AVAudioFormat(standardFormatWithSampleRate: 24_000, channels: 1)!
     let recFormat = AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16_000, channels: 1, interleaved: false)!
     var engineRunning = false
@@ -93,14 +96,53 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     override init() {
         super.init()
         synth.delegate = self
-        // Plugging in AirPods or switching output stops the engine; rebuild it if we still need it.
-        NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
+        observeConfigurationChanges()
+    }
+
+    /// Plugging in AirPods or switching output stops the engine; rebuild it if we still need it.
+    func observeConfigurationChanges() {
+        if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
+        configObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             guard let self else { return }
+            log("Audio devices changed; restarting the audio engine.")
             self.engineRunning = false
             self.engine.inputNode.removeTap(onBus: 0)
             if self.listening || self.isSpeaking {
                 do { try self.ensureEngine() } catch { emit(["ev": "error", "message": error.localizedDescription]) }
             }
+        }
+    }
+
+    /// A fresh engine and player. A failed voice-processing start can leave the old engine unusable.
+    func rebuildEngine() {
+        engine.inputNode.removeTap(onBus: 0)
+        engine.stop()
+        engine = AVAudioEngine()
+        player = AVAudioPlayerNode()
+        engineRunning = false
+        observeConfigurationChanges()
+    }
+
+    static let micOff = "Watson can't use the microphone. Turn on Watson in System Settings → Privacy & Security → Microphone."
+    static let speechOff = "Watson can't use speech recognition. Turn on Watson in System Settings → Privacy & Security → Speech Recognition."
+
+    /// Checks Microphone and Speech Recognition before touching the audio engine: without them
+    /// the engine fails with an unreadable Core Audio error.
+    func checkPermissions() throws {
+        func fail(_ message: String) -> NSError { NSError(domain: "watson", code: 3, userInfo: [NSLocalizedDescriptionKey: message]) }
+        switch AVCaptureDevice.authorizationStatus(for: .audio) {
+        case .authorized: break
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .audio) { _ in }
+            throw fail("Allow Watson to use the microphone when macOS asks, then try again.")
+        default: throw fail(Voice.micOff)
+        }
+        switch SFSpeechRecognizer.authorizationStatus() {
+        case .authorized: break
+        case .notDetermined:
+            SFSpeechRecognizer.requestAuthorization { _ in }
+            throw fail("Allow Watson to use speech recognition when macOS asks, then try again.")
+        default: throw fail(Voice.speechOff)
         }
     }
 
@@ -111,9 +153,22 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     func ensureEngine() throws {
         stopEngineWork?.cancel()
         if engineRunning && engine.isRunning { return }
+        do {
+            try startEngine(voiceProcessing: echoCancellation && !voiceProcessingFailed)
+        } catch where echoCancellation && !voiceProcessingFailed {
+            // Seen on an M1 with macOS 27: AUVoiceIO fails to initialize (-10875). Use the plain mic
+            // instead of giving up; barge-in then relies on the word filter in onResult.
+            log("Audio engine failed with echo cancellation (\((error as NSError).domain) \((error as NSError).code)); retrying without it.")
+            voiceProcessingFailed = true
+            rebuildEngine()
+            try startEngine(voiceProcessing: false)
+        }
+    }
+
+    func startEngine(voiceProcessing: Bool) throws {
         engineRunning = false
         let input = engine.inputNode
-        if echoCancellation {
+        if voiceProcessing {
             do {
                 try input.setVoiceProcessingEnabled(true)
                 if #available(macOS 14.0, *) {
@@ -142,8 +197,14 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
             self?.handleInput(buffer)
         }
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            throw error
+        }
         engineRunning = true
+        log("Audio engine started: \(Int(inFormat.sampleRate)) Hz, \(inFormat.channelCount) ch, echo cancellation \(input.isVoiceProcessingEnabled ? "on" : "off")")
         player.play() // no-op if already playing; needed after an engine restart
     }
 
@@ -198,6 +259,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
 
     func startListening(silence: Double?) throws {
         endRecognition(cancel: true)
+        try checkPermissions()
         if let silence { silenceSeconds = silence }
         if recognizer == nil || recognizer?.locale.identifier != locale {
             recognizer = SFSpeechRecognizer(locale: Locale(identifier: locale))
