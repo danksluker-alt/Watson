@@ -24,7 +24,7 @@ export class Store extends EventEmitter {
     agents: [],
     sounds: true,
     muted: false,
-    draftParked: false,
+    parked: null,
     automations: [],
     timers: [],
     ringing: null,

@@ -1,7 +1,15 @@
 // Apple Notes through AppleScript. Watson can list, search, read and create notes,
 // never edit or delete them.
 import type { NotesData } from '@shared/types'
-import { asString, FS, osascript, RS } from './os'
+import { asString, FS, osascript as run, RS } from './os'
+
+/** Notes hangs (rather than failing) while macOS waits for you to allow Watson to control it. */
+const osascript = (script: string, timeoutMs?: number) =>
+  run(script, timeoutMs).catch((e: Error) => {
+    if (/took too long/.test(e.message)) throw new Error('Apple Notes didn’t answer. If macOS is asking whether Watson may control Notes, click OK, then try again.')
+    if (/-1743|not allowed/i.test(e.message)) throw new Error('macOS blocked Watson from reading Notes. Allow it in System Settings → Privacy & Security → Automation → Watson → Notes.')
+    throw e
+  })
 
 type Note = NotesData['notes'][number]
 
@@ -40,8 +48,54 @@ function parse(out: string): Note[] {
     .sort((a, b) => b.modified - a.modified)
 }
 
+/**
+ * The newest notes. Reading every note's text one by one is slow with a big iCloud library
+ * (it once took over 20 s), so first get all ids and dates in one request, then read only the newest.
+ */
 export async function recentNotes(limit = 8): Promise<NotesData> {
-  const out = await osascript(listScript('notes', 30), 20_000)
+  const index = await osascript(
+    `
+    set fs to character id 31
+    set rs to character id 30
+    tell application "Notes"
+      set ids to id of notes
+      set ds to modification date of notes
+    end tell
+    set out to ""
+    repeat with i from 1 to count of ids
+      set out to out & (item i of ids) & fs & ((item i of ds) as «class isot» as string) & rs
+    end repeat
+    return out`,
+    20_000,
+  )
+  const newest = index
+    .split(RS)
+    .filter((r) => r.includes(FS))
+    .map((r) => {
+      const [id, modified] = r.split(FS)
+      return { id, at: Date.parse(modified) || 0 }
+    })
+    .sort((a, b) => b.at - a.at)
+    .slice(0, limit)
+  if (!newest.length) return { notes: [] }
+  const list = `{${newest.map((n) => asString(n.id)).join(', ')}}`
+  // Only a handful of notes, fetched directly by id.
+  const out = await osascript(
+      `
+      set fs to character id 31
+      set rs to character id 30
+      set out to ""
+      tell application "Notes"
+        repeat with nid in ${list}
+          set x to note id nid
+          set p to plaintext of x
+          if length of p > 160 then set p to text 1 thru 160 of p
+          set out to out & ${LIST_FIELDS} & rs
+        end repeat
+      end tell
+      return out`,
+    15_000,
+  )
   return { notes: parse(out).slice(0, limit) }
 }
 

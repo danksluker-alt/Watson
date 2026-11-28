@@ -576,8 +576,9 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         // A chosen gender is respected: its most natural voice, in this region if it has one, else any accent.
         let wanted: AVSpeechSynthesisVoiceGender? = gender == "male" ? .male : gender == "female" ? .female : nil
         if let wanted {
-            let here = pool.filter { $0.gender == wanted }
-            let anywhere = candidates.filter { $0.gender == wanted }
+            // Novelty voices (score 0) never count, even if they're the only ones of that gender.
+            let here = pool.filter { $0.gender == wanted && Voice.naturalness($0) > 0 }
+            let anywhere = candidates.filter { $0.gender == wanted && Voice.naturalness($0) > 0 }
             if let v = best(here), let w = best(anywhere) { return Voice.naturalness(w) > Voice.naturalness(v) ? w : v }
             if let v = best(here) ?? best(anywhere) { return v }
         }

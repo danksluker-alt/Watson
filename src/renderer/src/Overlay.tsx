@@ -4,7 +4,7 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { UIState } from '@shared/types'
-import { ArrowUp, Check, Close, Gear, Grid, InsertText, Keyboard, Mic, Pencil, Sparkle, Speaker, Trash, Warning, Wave } from './components/Icons'
+import { ArrowUp, Check, Close, Grid, InsertText, Keyboard, Mic, Pencil, Sparkle, Speaker, Trash, Warning, Wave } from './components/Icons'
 import { Markdown } from './components/Markdown'
 import { Bars, Orb } from './components/Orb'
 import { play } from './sounds'
@@ -81,6 +81,9 @@ function useSounds(s: UIState | null) {
  * When you stop: the text is editable, with Send and Discard. Where it goes and the
  * other ways of talking are one click further, under the destination button.
  */
+/** Sends the open draft's newest text right away (Esc must not lose the last keystrokes). */
+let flushOpenDraft: (() => void) | null = null
+
 function DraftEditor({ s }: { s: UIState }) {
   const [text, setText] = useState(s.draft?.text ?? '')
   const [more, setMore] = useState(false)
@@ -114,11 +117,29 @@ function DraftEditor({ s }: { s: UIState }) {
   }, [draftId, listening])
 
   // Edits are kept by the main process (and on disk), so clicking away never loses them.
+  // A short pause batches keystrokes; anything not yet sent goes when the box closes or listens.
+  const latest = useRef({ text, sent: text })
+  latest.current.text = text
+  const flush = () => {
+    if (latest.current.text === latest.current.sent) return
+    latest.current.sent = latest.current.text
+    window.watson.draftText(latest.current.text)
+  }
   useEffect(() => {
-    if (listening) return
-    const t = setTimeout(() => window.watson.draftText(text), 300)
+    if (listening) return flush()
+    const t = setTimeout(flush, 300)
     return () => clearTimeout(t)
-  }, [text, listening])
+  }, [text, listening]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    flushOpenDraft = flush
+    return () => {
+      flush()
+      flushOpenDraft = null
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    latest.current.sent = s.draft?.text ?? ''
+  }, [draftId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const el = area.current
@@ -237,7 +258,7 @@ function DraftEditor({ s }: { s: UIState }) {
 
 // ---------------- Island ----------------
 
-const isReviewing = (s: UIState) => (Boolean(s.draft) && !s.draftParked) || (s.capture === 'review' && s.phase === 'listening' && Boolean(s.transcript))
+const isReviewing = (s: UIState) => Boolean(s.draft) || (s.capture === 'review' && s.phase === 'listening' && Boolean(s.transcript))
 
 /** pill (resting or live status), compact (listening/thinking/speaking), dictation, or the full panel. */
 function modeOf(s: UIState): Mode {
@@ -309,6 +330,7 @@ export function Overlay() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
+        flushOpenDraft?.()
         window.watson.setArranging(false)
         window.watson.dismiss()
       }
@@ -366,6 +388,11 @@ export function Overlay() {
               <motion.div
                 key="pill"
                 role="button"
+                tabIndex={0}
+                aria-label="Talk to Watson"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') window.watson.toggleListen()
+                }}
                 className={quick ? 'pill quick' : 'pill'}
                 {...hold.handlers}
                 onContextMenu={(e) => {
@@ -492,6 +519,7 @@ export function Overlay() {
                 transition={{ duration: 0.2 }}
               >
                 {s.error && <ErrorCard message={s.error} />}
+                {s.notice && <div className="card notice">{s.notice}</div>}
                 <DraftEditor s={s} />
               </motion.div>
             )}
@@ -514,17 +542,9 @@ export function Overlay() {
                     {s.panel?.subtitle && s.phase === 'idle' && <div className="panel-sub">{s.panel.subtitle}</div>}
                   </div>
                   <div className="panel-actions">
-                    <button className="icon-btn" onClick={startTyping} aria-label="Type">
-                      <Keyboard size={16} />
-                    </button>
                     <MuteButton s={s} />
-                    <button className="icon-btn" onClick={() => window.watson.openWindow()} aria-label="Open the Watson window" title="Open the Watson window">
-                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />
-                      </svg>
-                    </button>
-                    <button className="icon-btn" onClick={() => window.watson.openSettings()} aria-label="Settings">
-                      <Gear size={16} />
+                    <button className="icon-btn" onClick={() => window.watson.openWindow()} aria-label="Open the dashboard" title="Dashboard">
+                      <Grid size={15} />
                     </button>
                     <button
                       className="icon-btn"
@@ -589,7 +609,6 @@ export function Overlay() {
                               {s.confirm.actionLabel}
                             </button>
                           </div>
-                          <div className="muted small">Or say “send” or “cancel”.</div>
                         </motion.div>
                       )}
 
@@ -614,8 +633,11 @@ export function Overlay() {
                 </>
 
                 <footer className="panel-foot">
-                  <span>Esc to close</span>
-                  <span>${s.usageTodayUsd.toFixed(3)} today</span>
+                  <button className="reply-bar" onClick={startTyping} aria-label="Type a reply">
+                    <Keyboard size={14} />
+                    <span>Reply…</span>
+                  </button>
+                  <span className="cost" title="Spent on the Claude API today">${s.usageTodayUsd.toFixed(3)}</span>
                 </footer>
               </motion.div>
             )}

@@ -3999,3 +3999,39 @@ html[data-view='home'] body {
   border-radius: 0;
   padding: 16px 14px 14px 20px;
 }
+
+/* ---- Panel footer: a slim reply bar ---- */
+
+.panel-foot {
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px 12px;
+}
+
+.reply-bar {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--label-3);
+  background: rgba(255, 255, 255, 0.05);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+  cursor: text;
+  transition: background 0.18s, color 0.18s;
+}
+
+.reply-bar:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--label-2);
+}
+
+.panel-foot .cost {
+  font-size: 10.5px;
+  color: var(--label-3);
+  font-variant-numeric: tabular-nums;
+  padding-right: 6px;
+}

@@ -108,11 +108,15 @@
   220 ms) shows `.pill-quick` dashboard (left) and live (right); the orb stays centred so clicks still talk.
 - Automations: `src/main/automations.ts` (automations.json; `nextRun`/`describeSchedule` in
   `src/shared/schedule.ts`), brain tool `automation`, `runAutomation` in index.ts (shut down/restart/sleep
-  = one-minute `confirm` that auto-proceeds). Missed runs never run late. Dashboard tab Automations.
-- Unsent draft: synced as you type (`ui:draftText`), saved to `draft.json` (`src/main/savedDraft.ts`).
-  Esc or the overlay losing focus parks it (`draftParked`): the pill shows it (tone `unsent`) and a click
-  reopens it (`openDraft`). Only Discard/Send clear it. Under 20 words it expires after 12 h; 20+ never.
-  Code that means "a draft is open" uses `activeDraft()`, not `store.state.draft`. Settings has "Get more voices" (Spoken Content pane).
+  = confirmed when created (`host.confirm`), then a one-minute `confirm` that auto-proceeds, skipped if
+  another confirmation is showing). Missed runs (Watson closed, Mac asleep: `powerMonitor` resume, >2 min
+  late) never run late; one-offs store their date. Delete needs an id or 3+ letters; several or "all" ask
+  first. Dashboard tab Automations.
+- Unsent words: the open draft (`draft`, synced as you type via `ui:draftText`, flushed on Esc/close) and
+  put-away words (`parked`, its own slot). Esc, clicking away (overlay blur) or going live moves the draft into
+  `parked` (joined to what's there); the pill shows it (tone `unsent`) and a click reopens it (`openDraft`).
+  New dictation always starts fresh. Both are saved to `draft.json` (`src/main/savedDraft.ts`); under 20
+  words expires after 12 h, 20+ never. A `final` from a cancelled listen is ignored (`!listening`). Settings has "Get more voices" (Spoken Content pane).
 - Mic watchdog: while listening, no audio buffers for 1.2 s rebuilds the engine (`restartMic`, max 3 per
   10 s). Config-change notifications within 1.5 s of our own start are ignored (echo cancellation causes
   one). After a change, the engine is rebuilt, not reused (reuse once left recognition deaf for a minute).

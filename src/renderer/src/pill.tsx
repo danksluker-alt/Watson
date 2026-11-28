@@ -82,7 +82,7 @@ export function useLive(s: UIState | null): LiveItem | null {
     return () => clearInterval(r)
   }, [])
   if (!s) return null
-  const draft = s.draftParked && s.draft?.text.trim() ? [{ key: 'draft', text: short(s.draft.text.trim(), 26), tone: 'unsent' as const }] : []
+  const draft = s.parked && !s.draft ? [{ key: 'draft', text: short(s.parked.text.trim(), 26), tone: 'unsent' as const }] : []
   const items = [
     ...draft,
     ...jobItems(s.jobs, now),

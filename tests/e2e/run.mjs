@@ -652,6 +652,10 @@ await scenario('Pass an earlier answer to another AI', async () => {
 
 await scenario('Automations: schedule one, see it in the dashboard', async () => {
   await overlay.evaluate(() => window.watson.ask('Turn off my Mac at 11 every night'))
+  // Scheduling a shut-down asks first.
+  await overlay.waitForSelector('.confirm .btn.primary', { timeout: 10_000 })
+  assert(!(await overlay.evaluate(() => window.watson.getState())).automations.length, 'scheduled before the OK')
+  await overlay.click('.confirm .btn.primary')
   await until(async () => (await overlay.evaluate(() => document.body.innerText)).includes('Every day at 11:00 PM'), 10_000)
   const existing = app.windows().find((w) => w.url().includes('#home'))
   const opened = existing ? null : app.waitForEvent('window', { timeout: 10_000 })

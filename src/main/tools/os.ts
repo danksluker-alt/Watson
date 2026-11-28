@@ -7,7 +7,8 @@ type Exec = (cmd: string, args: string[], timeoutMs: number) => Promise<string>
 const real: Exec = (cmd, args, timeoutMs) =>
   new Promise((resolve, reject) => {
     execFile(cmd, args, { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 }, (err, stdout, stderr) => {
-      if (err) reject(new Error((stderr || err.message).trim()))
+      // Never put the script itself in the message (it ends up in logs); say what went wrong.
+      if (err) reject(new Error(err.killed ? `${cmd.split('/').pop()} took too long and was stopped.` : (stderr || `${cmd.split('/').pop()} failed (${err.code ?? 'error'}).`).trim()))
       else resolve(stdout.trim())
     })
   })

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } from 'electron'
+import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, Notification, powerMonitor, screen, shell, Tray } from 'electron'
 import path from 'node:path'
 import type { Block, InputMode, MusicApp, Panel, PendingConfirm, PermissionStatus, RunningApp, SecretName, Settings, StockRange, UIState, VoiceInfo } from '@shared/types'
 import { Brain, BudgetError, isSilent, SILENT, type ToolHost } from './brain'
@@ -353,18 +353,17 @@ function pushState(s: UIState) {
 }
 store.on('change', pushState)
 
-/** A draft that's open on screen (not put away in the pill). */
-const activeDraft = () => (store.state.draft && !store.state.draftParked ? store.state.draft : null)
+/** The draft open on screen. Words put away in the pill live separately in `parked`. */
+const activeDraft = () => store.state.draft
 
-// The unsent draft is saved as it changes, so it survives clicking away, quitting and restarts.
+// Unsent words are saved as they change, so they survive clicking away, quitting and restarts.
 const draftFile = () => path.join(app.getPath('userData'), 'draft.json')
 let savedDraftText = ''
-let draftEditedAt = 0
+const unsentText = (s: UIState) => [s.parked?.text, s.draft?.text].filter((x): x is string => Boolean(x?.trim())).join('\n\n')
 store.on('change', (s: UIState) => {
-  const text = s.draft?.text ?? ''
+  const text = unsentText(s)
   if (text === savedDraftText) return
   savedDraftText = text
-  draftEditedAt = Date.now()
   writeSavedDraft(draftFile(), text)
 })
 
@@ -372,30 +371,34 @@ function restoreDraft() {
   const d = readSavedDraft(draftFile())
   if (!d) return
   savedDraftText = d.text
-  draftEditedAt = d.at
-  store.set({ draft: { id: ++draftSeq, text: d.text }, draftParked: true, capture: 'review' })
-  console.log('[watson] restored an unsent draft')
+  store.set({ parked: { text: d.text, at: d.at } })
+  console.log('[watson] restored unsent words')
 }
 
-/** Put the draft away in the pill; it comes back with a click. */
+/** Put the open draft away in the pill (joined to anything already there); a click brings it back. */
 function parkDraft() {
-  if (!store.state.draft || store.state.draftParked || listening || store.state.phase !== 'idle') return
-  if (!store.state.draft.text.trim()) {
-    store.set({ draft: null, capture: getSettings().inputMode, expanded: false })
-    return syncWake()
-  }
-  store.set({ draftParked: true, expanded: false, error: null })
+  const d = store.state.draft
+  if (!d || listening || store.state.phase !== 'idle') return
+  const text = d.text.trim()
+  const parked = text ? { text: store.state.parked ? `${store.state.parked.text}\n\n${text}` : text, at: Date.now() } : store.state.parked
+  store.set({ draft: null, parked, expanded: false, error: null, capture: getSettings().inputMode })
   syncWake()
 }
 
+/** Same as parkDraft, whatever Watson is doing (used when another action takes over the screen). */
+function parkDraftNow() {
+  const d = store.state.draft
+  const text = d?.text.trim()
+  if (!d) return
+  store.set({ draft: null, ...(text ? { parked: { text: store.state.parked ? `${store.state.parked.text}\n\n${text}` : text, at: Date.now() } } : {}) })
+}
+
 function openDraft() {
-  if (!store.state.draft) return
-  // Too old to still matter: let it go instead of reopening it.
-  if (draftExpired(store.state.draft.text, draftEditedAt)) {
-    store.set({ draft: null, draftParked: false, capture: getSettings().inputMode })
-    return
-  }
-  store.set({ draftParked: false, expanded: true, tucked: false, capture: 'review' })
+  const p = store.state.parked
+  if (!p || store.state.draft) return
+  // Too old to still matter (short ones only): let it go instead of reopening it.
+  if (draftExpired(p.text, p.at)) return store.set({ parked: null })
+  store.set({ draft: { id: ++draftSeq, text: p.text }, parked: null, expanded: true, tucked: false, capture: 'review' })
   liveOverlay()?.focus()
 }
 
@@ -480,7 +483,8 @@ function speakText(text: string) {
   speaker.push(text)
   speaker.flush()
   // Nothing was spoken (muted): carry on as if the speech had finished.
-  if (!speakingActive) setTimeout(afterSpeech, 0)
+  // (A running turn calls afterSpeech itself when it ends.)
+  if (!speakingActive && !responding) setTimeout(afterSpeech, 0)
 }
 
 function setMuted(muted: boolean) {
@@ -498,13 +502,20 @@ function setMuted(muted: boolean) {
 function takeOver(current: string) {
   clearTimer('noSpeech')
   clearTimer('followUp')
+  // Typing over a running answer stops it, so nothing keeps talking behind the editor.
+  if (store.state.phase === 'thinking' || store.state.phase === 'speaking') {
+    turnAbort?.abort()
+    responding = false
+    helper.send('speak.stop')
+    speakingActive = false
+  }
   if (listening) helper.send('listen.cancel')
   listening = false
   liveTalk = false
   const heard = store.state.phase === 'listening' ? store.state.transcript.trim() : ''
   const base = String(current ?? '').trim() || store.state.draft?.text.trim() || ''
   const joined = [base, heard].filter(Boolean).join(' ')
-  store.set({ draft: { id: ++draftSeq, text: joined }, draftParked: false, tucked: false, phase: 'idle', transcript: '', capture: 'review', expanded: true, error: null })
+  store.set({ draft: { id: ++draftSeq, text: joined }, tucked: false, phase: 'idle', transcript: '', capture: 'review', expanded: true, error: null })
   liveOverlay()?.focus()
 }
 
@@ -605,7 +616,7 @@ function afterSpeech() {
 function appendDraft(text: string) {
   const prev = store.state.draft?.text.trim()
   const joined = prev ? `${prev} ${text.trim()}` : text.trim()
-  store.set({ draft: { id: ++draftSeq, text: joined }, draftParked: false, phase: 'idle', transcript: '', capture: 'review', expanded: true })
+  store.set({ draft: { id: ++draftSeq, text: joined }, phase: 'idle', transcript: '', capture: 'review', expanded: true })
   clearTimer('noSpeech')
   liveOverlay()?.focus() // so the text can be edited right away
 }
@@ -634,6 +645,8 @@ function onHelperEvent(e: HelperEvent) {
       store.set({ transcript: e.text })
       break
     case 'final':
+      // Words from a listen that was already cancelled (you took over by typing) are dropped.
+      if (!listening) break
       console.log(`[watson] heard ${e.text.split(/\s+/).filter(Boolean).length} words (${store.state.capture})`)
       listening = false
       if (store.state.capture === 'review') appendDraft(e.text)
@@ -765,6 +778,7 @@ async function runTurn(text: string, mode: 'voice' | 'text', unprompted = false)
       pinned.removeKind(kind)
       buildTrayMenu()
     },
+    confirm: (title, body, actionLabel) => confirm(title, body, actionLabel),
   }
   try {
     const answer = await brain.respond(text, {
@@ -863,8 +877,6 @@ function onHotkey(mode: InputMode) {
     case 'idle':
       // Remember the app you were in, so dictation can be typed back into it.
       void rememberInsertTarget()
-      // Dictating again brings a put-away draft back and adds to it; a live talk leaves it put away.
-      if (store.state.draftParked && mode === 'review') openDraft()
       store.set({ capture: activeDraft() ? 'review' : mode })
       liveTalk = store.state.capture === 'live'
       return startListening('fresh')
@@ -913,8 +925,8 @@ function dismiss() {
   })
   // Esc never throws away your words: the draft goes into the pill (Discard deletes it).
   if (store.state.draft) {
-    if (store.state.draft.text.trim()) store.set({ draftParked: true, capture: 'review' })
-    else store.set({ draft: null, draftParked: false })
+    const text = store.state.draft.text.trim()
+    store.set({ draft: null, ...(text ? { parked: { text: store.state.parked ? `${store.state.parked.text}\n\n${text}` : text, at: Date.now() } } : {}) })
   }
   syncWake()
 }
@@ -922,7 +934,7 @@ function dismiss() {
 /** The user edited their dictated words and chose where they go. */
 async function submitDraft(text: string, target: string) {
   const t = text.trim()
-  store.set({ draft: null, draftParked: false, capture: getSettings().inputMode })
+  store.set({ draft: null, capture: getSettings().inputMode })
   if (!t) return goIdle()
   liveTalk = false
   if (target === 'watson') return handleUtterance(t, helper.ready ? 'voice' : 'text')
@@ -968,14 +980,17 @@ async function runAutomation(a: AutomationItem) {
   try {
     if (a.action === 'shut_down' || a.action === 'restart' || a.action === 'sleep') {
       const verb = a.action === 'shut_down' ? 'shut down' : a.action === 'restart' ? 'restart' : 'go to sleep'
+      // The warning must be seen: if another question is on screen, skip this time instead.
+      if (store.state.confirm) {
+        new Notification({ title: 'Watson', body: `Skipped your scheduled ${verb}: Watson was waiting for another answer.` }).show()
+        return console.log('[watson] automation skipped: another confirmation was showing')
+      }
       new Notification({ title: 'Watson', body: `Your Mac will ${verb} in one minute.` }).show()
-      const ok = await Promise.race([
-        confirm(`${a.label} in one minute`, `Your scheduled automation. Save your work, or cancel it this time.`, a.action === 'shut_down' ? 'Shut down now' : a.action === 'restart' ? 'Restart now' : 'Sleep now'),
-        new Promise<boolean>((r) => setTimeout(() => r(true), 60_000)),
-      ])
-      // Clear the card if the minute ran out with nobody answering.
-      const card = store.state.confirm
-      if (card && card.title.startsWith(a.label)) confirms.get(card.id)?.(ok)
+      const answer = confirm(`${a.label} in one minute`, `Your scheduled automation. Save your work, or cancel it this time.`, a.action === 'shut_down' ? 'Shut down now' : a.action === 'restart' ? 'Restart now' : 'Sleep now')
+      const id = `c${confirmSeq}`
+      // You agreed to this schedule when it was made; the minute is your chance to cancel.
+      const ok = await Promise.race([answer, new Promise<boolean>((r) => setTimeout(() => r(true), 60_000))])
+      confirms.get(id)?.(ok) // takes the card away if the minute ran out
       if (!ok) return console.log('[watson] automation cancelled by the user')
       if (a.action === 'sleep') await runOs('/usr/bin/pmset', ['sleepnow'])
       else await osascript(`tell application "System Events" to ${a.action === 'shut_down' ? 'shut down' : 'restart'}`)
@@ -984,7 +999,10 @@ async function runAutomation(a: AutomationItem) {
     else if (a.action === 'announce') {
       new Notification({ title: 'Watson', body: a.value ?? a.label }).show()
       announce(a.value ?? a.label, null)
-    } else await macControl(a.action === 'volume' ? 'volume' : a.action, a.action === 'volume' ? Number(a.value) || 30 : undefined)
+    } else {
+      const level = Number(a.value)
+      await macControl(a.action, a.action === 'volume' ? (Number.isFinite(level) ? level : 30) : undefined)
+    }
     console.log(`[watson] automation ran: ${a.action}`)
   } catch (e) {
     console.error('[watson] automation failed:', e instanceof Error ? e.message : e)
@@ -1148,7 +1166,7 @@ function registerIpc() {
   ipcMain.on('ui:focus', () => liveOverlay()?.focus())
   ipcMain.on('ui:toggleListen', () => {
     // A click on the pill with a put-away draft opens it.
-    if (store.state.draftParked && store.state.phase === 'idle') return openDraft()
+    if (store.state.parked && !store.state.draft && store.state.phase === 'idle') return openDraft()
     onHotkey(activeDraft() ? 'review' : getSettings().inputMode)
   })
   ipcMain.on('ui:openDraft', () => openDraft())
@@ -1191,8 +1209,8 @@ function registerIpc() {
     if (listening) helper.send('listen.cancel')
     listening = false
     // Words not being sent along stay safe in the pill.
-    const keep = !text && store.state.draft?.text.trim() ? store.state.draft : null
-    store.set({ draft: keep, draftParked: Boolean(keep), error: null, capture: 'live' })
+    if (!text) parkDraftNow()
+    store.set({ draft: null, error: null, capture: 'live' })
     liveTalk = true
     if (text) return void handleUtterance(text, 'voice')
     startListening('fresh')
@@ -1234,6 +1252,8 @@ function registerIpc() {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url)
   })
   ipcMain.on('ui:setCapture', (_e, mode: InputMode) => {
+    // Going live with an open box: its words wait in the pill instead of hiding the answer.
+    if (mode !== 'review') parkDraftNow()
     store.set({ capture: mode === 'review' ? 'review' : 'live' })
     liveTalk = mode !== 'review'
   })
@@ -1252,7 +1272,7 @@ function registerIpc() {
   ipcMain.on('ui:cancelDraft', () => {
     if (listening) helper.send('listen.cancel')
     listening = false
-    store.set({ draft: null, draftParked: false, error: null })
+    store.set({ draft: null, error: null })
     goIdle()
   })
   ipcMain.on('ui:pin', async (_e, block: Block) => {
@@ -1348,7 +1368,7 @@ app.whenReady().then(() => {
   restoreDraft()
   // A short draft left in the pill for more than 12 hours is let go; 20 words or more are kept.
   setInterval(() => {
-    if (store.state.draftParked && store.state.draft && draftExpired(store.state.draft.text, draftEditedAt)) store.set({ draft: null, draftParked: false, capture: getSettings().inputMode })
+    if (store.state.parked && draftExpired(store.state.parked.text, store.state.parked.at)) store.set({ parked: null })
   }, 10 * 60_000)
   createTray()
   registerHotkeys()
@@ -1373,6 +1393,7 @@ app.whenReady().then(() => {
   automations.on('change', (list: AutomationItem[]) => store.set({ automations: list }))
   automations.on('run', (a: AutomationItem) => void runAutomation(a))
   automations.restore()
+  powerMonitor.on('resume', () => automations.resume())
   timerStore.on('change', (list: TimerItem[]) => store.set({ timers: list }))
   timerStore.on('fire', onTimerFire)
   timerStore.restore()

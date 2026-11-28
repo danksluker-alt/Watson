@@ -47,6 +47,8 @@ export type ToolHost = {
   /** Put a widget on a screen as a floating window. */
   pin: (kind: WidgetKind, params: Record<string, string>, screen: ScreenChoice) => Promise<string>
   unpin: (kind: WidgetKind | 'all') => void
+  /** Ask the user to OK something (a card with Cancel and the action). */
+  confirm: (title: string, body: string, actionLabel: string) => Promise<boolean>
   helper: Helper
 }
 
@@ -791,7 +793,7 @@ export class Brain {
           if (!found.length) return `No files found for "${query}".`
           const day = (ms: number) => new Date(ms).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
           host.addBlocks([{ type: 'list', items: found.map((f) => ({ title: f.name, detail: f.folder, meta: `${f.kind} · ${day(f.modified)}` })) }], { title: `Files matching “${query}”` })
-          return JSON.stringify({ files: found.map((f) => ({ name: f.name, path: f.path, modified: day(f.modified) })), list: 'shown to the user already; do not show it again' })
+          return JSON.stringify({ files: found.map((f) => ({ name: f.name, path: f.path, modified: day(f.modified) })), note: 'The user sees these files. In one sentence give the count or the best match; do not mention a list or the screen.' })
         } catch (e) {
           host.finishActivity(a, false)
           throw e
@@ -803,12 +805,25 @@ export class Brain {
           host.addBlocks([{ type: 'list', items: automations.list().map((x) => ({ title: x.label, detail: describeSchedule(x.time, x.repeat, x.nextAt), meta: x.enabled ? '' : 'Off' })) }], { title: 'Automations' })
         if (a.action === 'create') {
           if (!a.do || !a.time) throw new Error('An automation needs what to do and a time.')
+          // Turning the Mac off on its own is a big deal: the user says yes first.
+          if (['shut_down', 'restart', 'sleep'].includes(a.do)) {
+            const what = a.do === 'shut_down' ? 'Shut down' : a.do === 'restart' ? 'Restart' : 'Put to sleep'
+            const when = `${a.repeat && a.repeat !== 'once' ? a.repeat.replace('daily', 'every day').replace('weekdays', 'on weekdays').replace('weekends', 'on weekends') : 'once'} at ${a.time}`
+            const ok = await host.confirm(`${what} your Mac ${when}?`, 'Watson will warn you a minute before, and you can cancel it then.', 'Schedule it')
+            if (!ok) return 'The user said no, so nothing was scheduled.'
+          }
           const item = automations.add({ action: a.do, value: a.value, time: a.time, date: a.date, repeat: a.repeat ?? 'once', label: a.label })
           show()
           return `Created "${item.label}": ${describeSchedule(item.time, item.repeat, item.nextAt)}. Watson must be running for it to happen.`
         }
         if (a.action === 'delete') {
-          const gone = automations.remove(a.target ?? '')
+          const matches = automations.match(a.target ?? '')
+          if (!matches.length) return 'No automation matched. Ask which one (list them if needed).'
+          if (matches.length > 1 || (a.target ?? '').trim().toLowerCase() === 'all') {
+            const ok = await host.confirm(`Delete ${matches.length} automation${matches.length === 1 ? '' : 's'}?`, matches.map((m) => m.label).join(', '), 'Delete')
+            if (!ok) return 'The user said no; nothing was deleted.'
+          }
+          const gone = automations.remove(matches.length === 1 ? matches[0].id : (a.target ?? ''))
           if (automations.list().length) show()
           return gone.length ? `Deleted ${gone.map((g) => `"${g.label}"`).join(', ')}.` : 'No automation matched.'
         }

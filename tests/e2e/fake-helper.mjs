@@ -128,6 +128,7 @@ function execFake(cmd, args) {
   if (cmd.endsWith('pmset')) return "Now drawing from 'Battery Power'\n -InternalBattery-0 (id=4653155)\t76%; discharging; 4:21 remaining present: true"
   if (script.includes('application "Notes"')) {
     if (script.includes('make new note')) return ''
+    if (script.includes('set ids to id of notes')) return notes.map((n) => [n[0], n[2]].join(FS)).join(RS) + RS
     if (script.includes('plaintext of x) & fs') || script.includes('return (name of x) & fs')) {
       const n = notes[0]
       return [n[1], n[2], n[4]].join(FS)

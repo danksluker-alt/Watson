@@ -240,8 +240,8 @@ export type UIState = {
   /** How the current listening session ends: answer right away, or fill the draft. */
   capture: InputMode
   draft: Draft | null
-  /** The unsent draft is put away in the pill (clicked away or Esc); a click brings it back. */
-  draftParked: boolean
+  /** Unsent words put away in the pill (clicked away or Esc); a click brings them back. New dictation starts fresh. */
+  parked: { text: string; at: number } | null
   insertTarget: string | null
   insertTargetName: string | null
   agents: { id: string; name: string }[]

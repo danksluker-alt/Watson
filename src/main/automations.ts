@@ -39,13 +39,25 @@ export class Automations extends EventEmitter {
     }
     // Ones that should have run while Watson was closed don't run late (a 3 a.m. shut-down at noon
     // would be a surprise): repeating ones move to their next time, missed one-offs are turned off.
+    this.catchUp()
+    this.changed()
+  }
+
+  /** Anything whose time passed while Watson was closed or the Mac slept moves on without running. */
+  catchUp() {
     for (const a of this.items) {
-      if (a.nextAt > Date.now()) continue
-      const n = nextRun(a.time, a.repeat, Date.now(), a.date)
-      if (n) a.nextAt = n
-      else a.enabled = false
+      if (a.enabled && a.nextAt <= Date.now()) {
+        const n = a.repeat === 'once' ? null : nextRun(a.time, a.repeat, Date.now())
+        if (n) a.nextAt = n
+        else a.enabled = false
+      }
+      this.schedule(a)
     }
-    for (const a of this.items) this.schedule(a)
+  }
+
+  /** After the Mac wakes: timers paused during sleep are re-armed against the real clock. */
+  resume() {
+    this.catchUp()
     this.changed()
   }
 
@@ -64,7 +76,8 @@ export class Automations extends EventEmitter {
       action: a.action,
       value: a.value?.trim() || undefined,
       time: a.time,
-      date: a.repeat === 'once' ? a.date : undefined,
+      // A one-off remembers its day, so a missed one is never moved to the next day.
+      date: a.repeat === 'once' ? (a.date ?? localDate(next)) : undefined,
       repeat: a.repeat,
       enabled: true,
       nextAt: next,
@@ -76,10 +89,21 @@ export class Automations extends EventEmitter {
     return item
   }
 
-  /** By id, or by a word in its label/action ("shut down"); "all" removes every one. */
-  remove(target: string): AutomationItem[] {
+  /** Which automations a delete would remove: by id, or by words in the label (3+ letters); "all" is every one. */
+  match(target: string): AutomationItem[] {
     const t = target.trim().toLowerCase()
-    const gone = t === 'all' ? [...this.items] : this.items.filter((a) => a.id === target || a.label.toLowerCase().includes(t) || a.action.replace('_', ' ').includes(t))
+    if (t === 'all') return [...this.items]
+    const byId = this.items.filter((a) => a.id === target.trim())
+    if (byId.length) return byId
+    if (t.length < 3) return []
+    const exact = this.items.filter((a) => a.label.toLowerCase() === t)
+    if (exact.length) return exact
+    return this.items.filter((a) => a.label.toLowerCase().includes(t) || a.action.replace(/_/g, ' ').includes(t))
+  }
+
+  remove(target: string): AutomationItem[] {
+    const ids = new Set(this.match(target).map((a) => a.id))
+    const gone = this.items.filter((a) => ids.has(a.id))
     for (const g of gone) {
       const h = this.handles.get(g.id)
       if (h) clearTimeout(h)
@@ -113,6 +137,11 @@ export class Automations extends EventEmitter {
       a.id,
       setTimeout(() => {
         if (Date.now() < a.nextAt - 50) return this.schedule(a)
+        // Timers pause while the Mac sleeps: a run more than 2 minutes late is skipped, not done late.
+        if (Date.now() - a.nextAt > 120_000) {
+          console.log(`[watson] automation skipped (late after sleep): ${a.action}`)
+          return this.resume()
+        }
         a.lastRunAt = Date.now()
         const n = a.repeat === 'once' ? null : nextRun(a.time, a.repeat, Date.now() + 1000)
         if (n) a.nextAt = n
@@ -133,6 +162,11 @@ export class Automations extends EventEmitter {
     }
     this.emit('change', this.list())
   }
+}
+
+const localDate = (ms: number) => {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 export const automations = new Automations()

@@ -91,11 +91,13 @@ glows with a moving rainbow edge; dictation has a quiet white one, so you can te
 **Dashboard** (Conversation, AI agents, Widgets, **Automations**). Automations lists what Watson does on
 its own at set times ("turn off my Mac at 11 every night", "open Slack at 9 on weekdays", "dark mode at
 7 pm"), plus running timers and alarms; each can be turned off or deleted there. Shut down, restart and
-sleep give a one-minute warning you can cancel. Watson must be running for them to happen; ones missed
+sleep ask for your OK when you set them up, then give a one-minute warning you can cancel. If the Mac was
+asleep at that time, they're skipped rather than done late. Watson must be running for them to happen; ones missed
 while it was closed don't run late.
 
 **Unsent words are never lost.** Clicking away from the box or pressing Esc puts the message in the pill
-(it shows its first words); click the pill to get it back. Only **Discard** deletes it. It's saved on
+(it shows its first words); click the pill to get it back. A new dictation starts fresh and doesn't mix
+with it. Only **Discard** deletes it. It's saved on
 disk, so it survives a restart. Messages of 20 words or more are kept until you send or discard them;
 shorter ones are let go after 12 hours. Only one unsent message is kept, so nothing piles up.
 
