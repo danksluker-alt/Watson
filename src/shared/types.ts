@@ -102,6 +102,23 @@ export type DelegationData = {
   summary?: string
   reply?: string
   error?: string
+  /** Hand-offs asked together ("ask Claude and Grok") share a group and are compared at the end. */
+  groupId?: string
+  /** An earlier answer passed along with this request ("send that to Claude"). */
+  attachedFrom?: string
+  startedAt?: number
+  endedAt?: number
+}
+
+/** Several AIs asked the same thing, side by side, with Watson's read on where they agree. */
+export type CompareData = {
+  groupId: string
+  prompt: string
+  jobs: DelegationData[]
+  /** Spoken summary: where they agree and the main difference. */
+  verdict?: string
+  /** One line per agent: what was distinctive about its answer. */
+  takeaways?: { agent: string; text: string }[]
 }
 
 export type Block =
@@ -120,6 +137,7 @@ export type Block =
   | { type: 'stock'; data: StockData }
   | { type: 'nowPlaying'; data: NowPlayingData }
   | { type: 'delegation'; data: DelegationData }
+  | { type: 'compare'; data: CompareData }
   | { type: 'calendar'; data: CalendarData }
   | { type: 'reminders'; data: RemindersData }
   | { type: 'notes'; data: NotesData }
@@ -132,7 +150,7 @@ export type Panel = { title?: string; subtitle?: string; blocks: Block[] }
 /** One request and Watson's answer, for the Watson window. */
 export type HistoryTurn = { id: string; at: number; mode: 'voice' | 'text'; you: string; watson: string; title?: string; blocks?: Block[] }
 
-export type HistoryData = { turns: HistoryTurn[]; jobs: (DelegationData & { at: number })[] }
+export type HistoryData = { turns: HistoryTurn[]; jobs: (DelegationData & { at: number })[]; compares?: (CompareData & { at: number })[] }
 
 /** Widgets that can be pinned to a screen. */
 export type WidgetKind = 'weather' | 'stock' | 'calendar' | 'reminders' | 'notes' | 'clock' | 'battery' | 'nowPlaying' | 'timers'
@@ -167,7 +185,8 @@ export type PillPlace = { displayId: number; fx: number; fy: number }
 export type IslandLayout = { centerX: number; dir: 'down' | 'up' }
 
 /** Short facts for the idle pill, refreshed in the background from free local sources. */
-export type Glance = { nextEvent?: { title: string; start: number; end: number }; weather?: { temp: number; code: number; isDay: boolean; unit: 'C' | 'F' } }
+/** What the pill can show on its own: the next event, when it's close. */
+export type Glance = { nextEvent?: { title: string; start: number; end: number } }
 
 /** Words dictated in review mode, waiting for the user to edit and send. */
 export type Draft = { id: number; text: string }

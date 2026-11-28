@@ -2,7 +2,7 @@ import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, Notific
 import path from 'node:path'
 import type { Block, InputMode, MusicApp, Panel, PermissionStatus, RunningApp, SecretName, Settings, StockRange, UIState, VoiceInfo } from '@shared/types'
 import { Brain, BudgetError, type ToolHost } from './brain'
-import { Delegations } from './delegate'
+import { Delegations, joinNames } from './delegate'
 import { Helper, type HelperEvent } from './helper'
 import { PinnedWidgets } from './pinned'
 import { installFileLog } from './log'
@@ -14,7 +14,6 @@ import { setExecBridge } from './tools/os'
 import { installedApps } from './tools/apps'
 import { history } from './history'
 import { getStock } from './tools/stocks'
-import { getWeather } from './tools/weather'
 import { getCalendar } from './tools/calendar'
 import { spentToday } from './usage'
 import { timerName, timers as timerStore } from './timers'
@@ -132,7 +131,7 @@ function placeOverlay() {
 }
 
 // Dragging: the window follows the pointer; on release the new spot is saved.
-let dragging: { cursor0: Electron.Point; win0: Electron.Point; anchor0: { x: number; y: number }; timer: NodeJS.Timeout } | null = null
+let dragging: { cursor0: Electron.Point; win0: Electron.Point; anchor0: { x: number; y: number }; startedAt: number; timer: NodeJS.Timeout } | null = null
 
 function startPillDrag() {
   const win = liveOverlay()
@@ -143,8 +142,11 @@ function startPillDrag() {
     cursor0: screen.getCursorScreenPoint(),
     win0: { x, y },
     anchor0: { x: a.x, y: a.y },
+    startedAt: Date.now(),
     timer: setInterval(() => {
       if (!dragging) return
+      // Safety net: if the release never reached the pill, stop following the cursor.
+      if (Date.now() - dragging.startedAt > 30_000) return endPillDrag()
       const c = screen.getCursorScreenPoint()
       liveOverlay()?.setPosition(Math.round(dragging.win0.x + c.x - dragging.cursor0.x), Math.round(dragging.win0.y + c.y - dragging.cursor0.y))
     }, 16),
@@ -344,10 +346,6 @@ function setSettings(patch: Partial<Settings>): Settings {
   syncFromSettings(next)
   if ('pillPlace' in patch) placeOverlay()
   if (next.pillShape !== store.state.pillShape) store.set({ pillShape: next.pillShape })
-  if (next.homeCity !== prev.homeCity || next.units !== prev.units) {
-    lastWeather = 0
-    void refreshGlance()
-  }
   buildTrayMenu()
   return next
 }
@@ -606,9 +604,18 @@ async function runTurn(text: string, mode: 'voice' | 'text') {
     },
     activity: (t) => store.activity(t),
     finishActivity: (id, ok, t) => store.finishActivity(id, ok ? 'done' : 'error', t),
-    delegate: async (agent, prompt, sensitive, newChat) => {
-      const { note, job } = await delegations.start(agent, prompt, sensitive, { newChat })
+    delegate: async (agent, prompt, sensitive, newChat, attachPrevious) => {
+      const attach = attachPrevious ? previousAnswer() : undefined
+      if (attachPrevious && !attach) throw new Error('There is no earlier answer from one of your AIs to pass along. Ask the user what to send.')
+      const { note, job } = await delegations.start(agent, prompt, sensitive, { newChat, attach })
       host.addBlocks([{ type: 'delegation', data: job }])
+      return note
+    },
+    askSeveral: async (agents, prompt, sensitive, attachPrevious) => {
+      const attach = attachPrevious ? previousAnswer() : undefined
+      if (attachPrevious && !attach) throw new Error('There is no earlier answer from one of your AIs to pass along. Ask the user what to send.')
+      const { note, jobs } = await delegations.startGroup(agents, prompt, sensitive, { attach })
+      host.addBlocks(jobs.map((job) => ({ type: 'delegation' as const, data: job })))
       return note
     },
     pin: async (kind, params, where) => {
@@ -677,8 +684,12 @@ async function rememberInsertTarget() {
   }
 }
 
+let lastHotkeyAt = 0
+
 function onHotkey(mode: InputMode) {
   if (store.state.ringing) return stopRinging()
+  const sinceLast = Date.now() - lastHotkeyAt
+  lastHotkeyAt = Date.now()
   console.log(`[watson] hotkey (${mode}) while ${store.state.phase}`)
   if (liveOverlay() && store.state.phase === 'idle') placeOverlay()
   switch (store.state.phase) {
@@ -690,6 +701,9 @@ function onHotkey(mode: InputMode) {
     case 'listening':
       return store.state.transcript ? stopListening(false) : stopListening(true)
     case 'thinking':
+      // A second press right after the one that sent the request is almost always a double
+      // press, not "cancel": keep the request.
+      if (sinceLast < 1500) return console.log('[watson] ignored a quick second press while thinking')
       turnAbort?.abort()
       helper.send('speak.stop')
       return goIdle()
@@ -802,37 +816,22 @@ function announce(spoken: string, panel: Panel | null) {
   }
 }
 
-// ---------------- Glance: what the idle pill shows ----------------
+// ---------------- Glance: what the pill can show on its own ----------------
 
-let lastWeather = 0
-
-/** Next event (Calendar) and current temperature (Open-Meteo): free, local, no API calls. */
+/** The next event from Calendar, so the pill can mention it when it's close. Local, no API calls. */
 async function refreshGlance() {
-  const glance = { ...store.state.glance }
-  if (helper.ready) {
-    try {
-      const now = Date.now()
-      const today = await getCalendar(helper, 'today')
-      const next = today.days
-        .flatMap((d) => d.events)
-        .filter((e) => !e.allDay && e.end > now && e.start < now + 3 * 3600_000)
-        .sort((a, b) => a.start - b.start)[0]
-      glance.nextEvent = next ? { title: next.title, start: next.start, end: next.end } : undefined
-    } catch {
-      glance.nextEvent = undefined // no Calendar access: just don't show it
-    }
+  if (!helper.ready) return
+  try {
+    const now = Date.now()
+    const today = await getCalendar(helper, 'today')
+    const next = today.days
+      .flatMap((d) => d.events)
+      .filter((e) => !e.allDay && e.end > now && e.start < now + 3 * 3600_000)
+      .sort((a, b) => a.start - b.start)[0]
+    store.set({ glance: { nextEvent: next ? { title: next.title, start: next.start, end: next.end } : undefined } })
+  } catch {
+    store.set({ glance: {} }) // no Calendar access: just don't show it
   }
-  if (Date.now() - lastWeather > 15 * 60_000) {
-    try {
-      const s = getSettings()
-      const w = await getWeather(s.homeCity, s.units)
-      glance.weather = { temp: Math.round(w.now.temp), code: w.now.code, isDay: w.now.isDay, unit: s.units }
-      lastWeather = Date.now()
-    } catch {
-      /* offline: keep the last reading */
-    }
-  }
-  store.set({ glance })
 }
 
 // ---------------- Timers ----------------
@@ -861,8 +860,23 @@ const delegations = new Delegations({
   store,
   confirm,
   summarize: (agent, prompt, reply) => brain.summarize(agent, prompt, reply),
+  compare: (prompt, answers) => brain.compare(prompt, answers),
+  compared: (c) => history.addCompare(c),
   announce,
 })
+
+/**
+ * The most recent answer from one of the user's AIs, for "send that to Claude". A compared
+ * question passes every answer along, labelled, so another AI can weigh them.
+ */
+function previousAnswer(): { from: string; text: string } | undefined {
+  const done = [...store.state.jobs, ...history.get().jobs].filter((j) => j.status === 'done' && j.reply?.trim())
+  const last = done.sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0))[0]
+  if (!last) return undefined
+  if (!last.groupId) return { from: last.agent, text: last.reply ?? '' }
+  const group = [...new Map(done.filter((j) => j.groupId === last.groupId).map((j) => [j.agent, j])).values()]
+  return { from: joinNames(group.map((j) => j.agent)), text: group.map((j) => `${j.agent}:\n${j.reply}`).join('\n\n') }
+}
 
 // ---------------- Helper setup ----------------
 

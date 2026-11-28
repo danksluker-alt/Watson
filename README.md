@@ -1,7 +1,7 @@
 # Watson
 
-A voice assistant for your Mac that lives in a small black pill at the top of the screen.
-Press **⌥ Space** (or click the pill) from any app and talk. Watson answers out loud. When
+A voice assistant for your Mac that lives in a small black circle at the top of the screen.
+Press **⌥ Space** (or click the circle) from any app and talk. Watson answers out loud. When
 an answer is better seen, the pill opens into a panel with live widgets: weather, stocks,
 your calendar, reminders, notes, world clocks, battery and what's playing. You can pin any
 of those widgets to any screen.
@@ -11,6 +11,27 @@ request in for you: Claude or ChatGPT on your Mac, or Grok, Gemini, Perplexity o
 website in your browser. That covers coding, changing your website, or anything that uses
 their Gmail, Calendar or Drive connectors. Watson watches for the answer and reads you a short
 summary. The work runs on that service's own plan, not on Watson's API key.
+
+## Why Watson, and not just Siri or the AI apps themselves
+
+If you use more than one AI, you know the routine: copy the question into Claude, then into
+Grok, sit and watch each one type, flip between windows to compare, copy the better answer into a
+third app to turn it into an email, and a week later you can't remember which app said what.
+Siri can't help with any of that; it doesn't talk to your AIs.
+
+Watson does the running around for you:
+
+- **One question, several AIs.** "Ask Claude and Grok which laptop to buy." Watson types it into
+  each app, waits for all of them in the background while you keep working, and shows the answers
+  side by side with a short verdict: where they agree, what differs, which is more complete.
+- **No babysitting.** The circle turns into a live status pill ("Claude + Grok · 1 of 2 in · 0:42",
+  "Grok is writing · 0:18") and Watson tells you when the answers are in.
+- **No copy-paste between AIs.** "Send that to Claude and turn it into an email" passes the last
+  answer (or every answer from a comparison) along with your request.
+- **One place for everything.** The Watson window keeps every question, hand-off and full answer,
+  searchable, on this Mac.
+- **Cheap.** The AIs do the heavy work on your own subscriptions; Watson only spends a small Haiku
+  call to summarize or compare.
 
 ## Install
 
@@ -30,10 +51,13 @@ The GitHub Actions workflows in `.github/workflows` only run when started by han
 
 ## The pill and the Watson window
 
-- The resting pill shows something useful: your next event ("MATH 112 · in 12m") and the weather,
-  a running timer, or a hand-off in progress.
+- At rest Watson is a small circle. It grows into a pill only to tell you something: an AI working
+  on your request and for how long ("Grok is writing · 0:18"), a comparison in progress, a running
+  timer ("Tea · 3:12"), an event about to start ("MATH 112 · in 8m"), or an answer that just came in.
+  Several things take turns; anything that needs your OK stays put.
 - **Click** it to talk. **Hold** it for half a second to lift it and drag it anywhere, on any screen;
-  when you let go, choose **Pill** or **Circle**, or **Reset** it to the top centre. Near an edge or
+  when you let go, choose **Circle** or **Pill** (a pill that says "Watson" at rest), or **Reset** it
+  to the top centre. Near an edge or
   the bottom of the screen the panel shifts or opens upward so it's never cut off.
 - **Open Watson** (the ⤢ button in the panel, or the menu-bar icon) shows your recent requests as a
   chat, every hand-off with its full answer, and anything waiting for your OK. It comes forward on its
@@ -159,6 +183,8 @@ This builds `release/mac-arm64/Watson.app` with its icon, signed for your Mac on
 - "Play Midnight City" · "next song" · "pause"
 - "Pin the weather to my other screen" · "Remove the pinned widgets"
 - "Ask Grok what people on X are saying about the new iPhone"
+- "Ask Claude and Grok which of these two flights is the better deal" · "Ask everyone…" (compared side by side)
+- "Send that to Claude and turn it into a short email" (passes the last answer along)
 - "Ask Claude to make the hero headline on my website shorter and open a PR"
 - "Have Claude draft an email to Sarah that the launch moved to Friday" (asks before sending)
 
@@ -178,6 +204,15 @@ This builds `release/mac-arm64/Watson.app` with its icon, signed for your Mac on
    the answer is done.
 5. Haiku turns the answer into 1–3 spoken sentences, plus a panel for code, steps or data.
    The full answer is one click away.
+
+**Several at once** ("ask Claude and Grok…"): Watson types into one app at a time, then waits for
+all of them side by side. When they're in, one Haiku call compares them (each answer clipped) into
+a spoken verdict and one line per AI; the panel and the Watson window show them in columns with the
+full answers a click away. If one AI fails, the others are still compared.
+
+**Passing an answer along** ("send that to Claude…"): the last answer (or every answer from the last
+comparison) is pasted after your request. Only your own words decide whether Watson asks before
+sending; the passed-along answer doesn't.
 
 Every hand-off starts with something you asked for. Watson never loops on its own.
 

@@ -22,6 +22,8 @@ let session = 0
 let speakQueue = []
 let speaking = false
 let speakGen = 0
+/** How slowly the simulated AIs answer (1 = about 2.4 s); POST /slow sets it, /reset restores it. */
+let answerScale = 1
 
 // ---------------- Simulated apps ----------------
 
@@ -62,14 +64,14 @@ function simulateAnswer(target, text, url) {
   setTimeout(() => {
     win.busy = true
     win.lines.push(lines[0])
-  }, 900)
+  }, 900 * answerScale)
   setTimeout(() => {
     win.lines.push(...lines.slice(1))
-  }, 1700)
+  }, 1700 * answerScale)
   setTimeout(() => {
     win.busy = false
     win.lines.push('Copy', 'Retry')
-  }, 2400)
+  }, 2400 * answerScale)
 }
 
 // ---------------- Calendar / Reminders / Notes data ----------------
@@ -284,6 +286,11 @@ http
     if (req.url === '/state') return res.end(JSON.stringify({ listening, speaking: speaking || speakQueue.length > 0, ...log }))
     if (req.url === '/reset') {
       for (const k of Object.keys(log)) log[k] = []
+      answerScale = 1
+      return res.end('{}')
+    }
+    if (req.url === '/slow') {
+      answerScale = Number(body.scale) || 1
       return res.end('{}')
     }
     res.statusCode = 404

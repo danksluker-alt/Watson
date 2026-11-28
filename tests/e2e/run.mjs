@@ -92,7 +92,7 @@ async function shot(name) {
 }
 
 async function scenario(name, fn) {
-  if (process.env.ONLY && !name.toLowerCase().includes(process.env.ONLY.toLowerCase())) return
+  if (process.env.ONLY && !process.env.ONLY.toLowerCase().split('|').some((o) => name.toLowerCase().includes(o))) return
   const started = Date.now()
   try {
     await reset()
@@ -118,9 +118,11 @@ const spokenText = async () => (await helper('/state')).spoken.join(' ')
 console.log('Watson end-to-end scenarios')
 
 await scenario('Pill at rest', async () => {
+  await overlay.mouse.move(5, 700)
   await shot('01-pill')
-  const label = await overlay.textContent('.pill')
-  assert(label.includes('Watson'), `pill says "${label}"`)
+  // At rest it's a small circle: nothing to report.
+  const w = await overlay.evaluate(() => document.querySelector('.island').getBoundingClientRect().width)
+  assert(w <= 40, `resting pill is ${w}px wide, expected the circle`)
   await overlay.click('.pill')
   await until(async () => (await helper('/state')).listening, 4000)
   await overlay.mouse.move(5, 700)
@@ -262,7 +264,9 @@ await scenario('Timer: counts down in the pill, rings, stops', async () => {
   await shot('21-timer')
   await overlay.evaluate(() => window.watson.dismiss())
   await overlay.mouse.move(5, 700)
-  await overlay.waitForSelector('.pill-timer', { timeout: 5000 })
+  // The circle grows into a pill with the countdown.
+  // (It may take turns with other live things, like a test event about to start.)
+  await until(async () => (await overlay.$$eval('.pill-label.live.timer', (els) => els.map((e) => e.textContent))).some((t) => /tea · 0:\d\d/i.test(t)), 9000)
   await sleep(700)
   await overlay.screenshot({ path: path.join(shots, '22-pill-timer.png') })
   await overlay.waitForSelector('.card.ringing', { timeout: 15_000 })
@@ -359,15 +363,50 @@ await scenario('Pill: corner position and circle shape stay on screen', async ()
   assert(box.bottom > box.vh - 12, `panel should open upward from the bottom: ${JSON.stringify(box)}`)
   await shot('25-corner-panel')
   await reset()
-  await overlay.evaluate(() => window.watson.setPillShape('circle'))
-  await until(async () => (await overlay.evaluate(() => document.querySelector('.island')?.getBoundingClientRect().width)) <= 40, 5000)
   await overlay.mouse.move(5, 5)
+  await until(async () => (await overlay.evaluate(() => document.querySelector('.island')?.getBoundingClientRect().width)) <= 40, 5000)
   await sleep(500)
   await overlay.screenshot({ path: path.join(shots, '26-circle.png') })
+  // The pill shape, if chosen instead, rests as a labelled pill.
   await overlay.evaluate(() => window.watson.setPillShape('pill'))
+  await until(async () => (await overlay.textContent('.pill')).includes('Watson'), 5000)
+  await overlay.evaluate(() => window.watson.setPillShape('circle'))
   await overlay.evaluate(() => window.watson.resetPillPlace())
   await until(async () => (await overlay.evaluate(() => window.watson.getState())).layout.dir === 'down', 5000)
   return 'bottom-right corner: panel opened upward, fully on screen; circle 38 px'
+})
+
+await scenario('Ask two AIs at once; live pill; side-by-side comparison', async () => {
+  await helper('/slow', { scale: 6 }) // the AIs take ~15 s, long enough to watch the pill
+  await talk('Ask Claude and Grok what people think of the new iPhone camera')
+  const sent = await until(async () => {
+    const s = (await helper('/state')).sent
+    return s.length === 2 ? s : null
+  }, 10_000)
+  assert(new Set(sent.map((x) => x.target)).size === 2, `both went to ${sent[0].target}`)
+  // Close the panel: the circle becomes a pill that says what's going on.
+  await until(async () => (await overlay.evaluate(() => window.watson.getState())).phase === 'idle', 15_000)
+  await overlay.evaluate(() => window.watson.dismiss())
+  await overlay.mouse.move(5, 700)
+  const live = await until(async () => (await overlay.$('.pill-label.live')) && (await overlay.textContent('.pill-label.live')), 5000)
+  assert(/Claude \+ Grok|Grok \+ Claude/.test(live), `pill said "${live}"`)
+  await shot('29-pill-live')
+  await until(async () => (await spokenText()).includes('more complete'), 40_000)
+  await overlay.waitForSelector('.compare-grid', { timeout: 5000 })
+  const cols = await overlay.$$eval('.compare-col', (els) => els.length)
+  assert(cols === 2, `${cols} columns`)
+  await shot('30-compare')
+  return `typed into ${sent.map((x) => x.target).join(' and ')}, pill showed "${live}", compared in ${cols} columns`
+})
+
+await scenario('Pass an earlier answer to another AI', async () => {
+  await talk('Send that to Claude')
+  const sent = await until(async () => (await helper('/state')).sent[0], 10_000)
+  assert(sent.text.startsWith('Turn it into a short summary'), `typed "${sent.text.slice(0, 40)}"`)
+  assert(/earlier answer from (Claude and Grok|Grok and Claude)/.test(sent.text) && sent.text.includes('price and battery'), 'the earlier answers were not passed along')
+  assert(!(await overlay.$('.confirm')), 'the attached answer should not trigger a confirmation')
+  await until(async () => (await spokenText()).includes('Claude answered'), 20_000)
+  return 'both earlier answers went along with the request, no confirmation needed'
 })
 
 await scenario('Watson window: chat history and hand-offs', async () => {
@@ -387,6 +426,7 @@ await scenario('Watson window: chat history and hand-offs', async () => {
   await win.waitForSelector('.job-card', { timeout: 5000 })
   const agents = await win.$$eval('.job-agent', (els) => els.map((e) => e.textContent))
   assert(agents.some((a) => a.includes('Grok')) && agents.some((a) => a.includes('Claude')), `hand-offs: ${agents.join(' | ')}`)
+  await win.waitForSelector('.job-card.group .compare-col', { timeout: 5000 })
   await win.click('.job-card.done .job-toggle')
   await win.waitForSelector('.job-reply', { timeout: 5000 })
   await sleep(300)

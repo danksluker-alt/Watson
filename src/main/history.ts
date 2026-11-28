@@ -4,10 +4,11 @@ import { app } from 'electron'
 import { EventEmitter } from 'node:events'
 import fs from 'node:fs'
 import path from 'node:path'
-import type { Block, DelegationData, HistoryData, HistoryTurn } from '@shared/types'
+import type { Block, CompareData, DelegationData, HistoryData, HistoryTurn } from '@shared/types'
 
 const MAX_TURNS = 300
 const MAX_JOBS = 100
+const MAX_COMPARES = 40
 const file = () => path.join(app.getPath('userData'), 'history.json')
 
 /** Widgets are rebuilt from live data, so only small blocks are worth keeping. */
@@ -24,7 +25,7 @@ export class History extends EventEmitter {
   load() {
     try {
       const d = JSON.parse(fs.readFileSync(file(), 'utf8')) as HistoryData
-      this.data = { turns: Array.isArray(d.turns) ? d.turns : [], jobs: Array.isArray(d.jobs) ? d.jobs : [] }
+      this.data = { turns: Array.isArray(d.turns) ? d.turns : [], jobs: Array.isArray(d.jobs) ? d.jobs : [], compares: Array.isArray(d.compares) ? d.compares : [] }
     } catch {
       this.data = { turns: [], jobs: [] }
     }
@@ -51,8 +52,15 @@ export class History extends EventEmitter {
     this.changed()
   }
 
+  /** A finished comparison. Its jobs are kept as hand-offs too; this adds the verdict. */
+  addCompare(c: CompareData) {
+    const jobs = c.jobs.map(({ reply: _r, ...j }) => j) // full answers live in the hand-offs already
+    this.data.compares = [...(this.data.compares ?? []).filter((x) => x.groupId !== c.groupId), { ...c, jobs, at: Date.now() }].slice(-MAX_COMPARES)
+    this.changed()
+  }
+
   clear() {
-    this.data = { turns: [], jobs: [] }
+    this.data = { turns: [], jobs: [], compares: [] }
     this.changed()
   }
 

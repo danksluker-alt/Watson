@@ -161,15 +161,6 @@ html[data-view='overlay'] body {
   color: var(--label-2);
 }
 
-.pill-job {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--label);
-}
-
 /* ---- compact ---- */
 
 .compact {
@@ -2572,16 +2563,6 @@ html[data-view='widget'] body {
 
 /* ---- Timers (Clock app style) ---- */
 
-.pill-timer {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  font-size: 13px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  color: #ff9f0a;
-}
-
 .pill-timer-dot {
   width: 6px;
   height: 6px;
@@ -2761,34 +2742,45 @@ html[data-view='widget'] body {
 
 /* ---- Pill: glance, circle, hold to move ---- */
 
-.pill-label.glance {
+.pill-label.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
   color: var(--label);
-  font-weight: 600;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
 
-.pill-label.glance.event {
+.pill-label.live.timer {
+  color: #ffb340;
+}
+
+.pill-label.live.event {
   color: #ffd9a8;
+}
+
+.pill-label.live.done {
+  color: #7ee2a8;
+}
+
+.pill-label.live.attention {
+  color: #ffb340;
+}
+
+.pill-event-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffd9a8;
+  flex: none;
 }
 
 .island.circle .pill {
   justify-content: center;
   padding: 0;
   position: relative;
-}
-
-.circle-badge {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: #ff9f0a;
-  box-shadow: 0 0 0 2px #000;
 }
 
 .pill {
@@ -3184,4 +3176,98 @@ html[data-view='home'] body {
   background: none;
   color: var(--label);
   font-size: 14px;
+}
+
+/* ---- Hand-off progress and comparisons ---- */
+
+.delegation-attached {
+  color: var(--label-3);
+}
+
+.delegation-live {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--label-2);
+  border-left: 2px solid rgba(255, 255, 255, 0.14);
+  padding-left: 9px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card.compare {
+  padding: 14px;
+}
+
+.compare-verdict {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--label);
+  margin-bottom: 12px;
+}
+
+.compare-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.compare-col {
+  background: rgba(0, 0, 0, 0.22);
+  border-radius: 12px;
+  padding: 10px 11px;
+  min-width: 0;
+}
+
+.compare-col.failed {
+  opacity: 0.6;
+}
+
+.compare-agent {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+}
+
+.compare-agent svg {
+  margin-left: auto;
+  color: var(--green);
+}
+
+.compare-col.failed .compare-agent svg {
+  color: var(--orange);
+}
+
+.compare-take {
+  margin-top: 7px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--label-2);
+}
+
+.compare-col .disclosure {
+  margin-top: 8px;
+}
+
+.compare-full {
+  margin-top: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.group-marks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: none;
+}
+
+.job-card.group .card.compare {
+  margin-top: 10px;
+  padding: 0;
+  background: none;
+  box-shadow: none;
 }

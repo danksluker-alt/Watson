@@ -1,14 +1,17 @@
 // The Watson window: everything in one place. Your recent requests as a simple chat, every
 // hand-off to your other AIs with its full answer, and anything waiting for your OK on top.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { HistoryData, HistoryTurn, UIState } from '@shared/types'
+import type { CompareData, DelegationData, HistoryData, HistoryTurn, UIState } from '@shared/types'
 import { ArrowUp, Check, Warning } from './components/Icons'
 import { Markdown } from './components/Markdown'
 import { Orb } from './components/Orb'
 import { Blocks } from './widgets/Blocks'
+import { CompareCard } from './widgets/Compare'
 import { AgentMark } from './widgets/Delegation'
 
 type Tab = 'chat' | 'handoffs'
+type Job = DelegationData & { at: number }
+type Entry = { kind: 'job'; job: Job } | { kind: 'group'; key: string; jobs: Job[]; compare?: CompareData; at: number }
 
 const time = (ms: number) => new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 
@@ -57,6 +60,22 @@ export function HomePage() {
   }, [h.turns, query])
   const jobs = useMemo(() => [...h.jobs].reverse().filter((j) => !query || `${j.agent} ${j.prompt} ${j.summary ?? ''}`.toLowerCase().includes(query.toLowerCase())), [h.jobs, query])
   const activeJobs = (s?.jobs ?? []).filter((j) => !['done', 'failed'].includes(j.status))
+  // Questions asked to several AIs at once show as one comparison.
+  const entries = useMemo(() => {
+    const out: Entry[] = []
+    const seen = new Set<string>()
+    for (const j of jobs) {
+      if (!j.groupId) {
+        out.push({ kind: 'job', job: j })
+        continue
+      }
+      if (seen.has(j.groupId)) continue
+      seen.add(j.groupId)
+      const members = h.jobs.filter((x) => x.groupId === j.groupId)
+      out.push({ kind: 'group', key: j.groupId, jobs: members, compare: h.compares?.find((c) => c.groupId === j.groupId), at: j.at })
+    }
+    return out
+  }, [jobs, h.jobs, h.compares])
 
   useEffect(() => {
     if (tab === 'chat') bottom.current?.scrollIntoView({ block: 'end' })
@@ -178,7 +197,41 @@ export function HomePage() {
                 <p>{query ? 'Nothing matches that search.' : 'When Watson hands something to Claude, Grok or another app, it shows up here with the full answer.'}</p>
               </div>
             )}
-            {jobs.map((j) => {
+            {entries.map((e) => {
+              if (e.kind === 'group') {
+                const live = e.jobs.some((j) => !['done', 'failed'].includes(j.status))
+                const names = e.jobs.map((j) => j.agent).join(' · ')
+                return (
+                  <div key={e.key} className="job-card group">
+                    <div className="job-head">
+                      <div className="group-marks">
+                        {e.jobs.map((j) => (
+                          <AgentMark key={j.jobId} name={j.agent} small />
+                        ))}
+                      </div>
+                      <div className="job-main">
+                        <div className="job-agent">
+                          {names}
+                          <span className={`job-status ${live ? 'waiting' : 'done'}`}>
+                            {live ? <span className="spinner" /> : <Check size={11} />}
+                            {live ? `${e.jobs.filter((j) => j.status === 'done' || j.status === 'reading').length} of ${e.jobs.length} answered` : 'Compared'}
+                          </span>
+                          <span className="stamp">
+                            {dayLabel(e.at)} · {time(e.at)}
+                          </span>
+                        </div>
+                        <div className="job-prompt">“{e.jobs[0]?.prompt}”</div>
+                      </div>
+                    </div>
+                    <CompareCard
+                      verdict
+                      data={e.compare ? { ...e.compare, jobs: e.jobs } : { groupId: e.key, prompt: e.jobs[0]?.prompt ?? '', jobs: e.jobs }}
+                      answers={Object.fromEntries(e.jobs.map((j) => [j.jobId, j.reply]))}
+                    />
+                  </div>
+                )
+              }
+              const j = e.job
               const key = `${j.jobId}-${j.at}`
               const live = !['done', 'failed'].includes(j.status)
               return (
@@ -196,7 +249,9 @@ export function HomePage() {
                           {dayLabel(j.at)} · {time(j.at)}
                         </span>
                       </div>
-                      <div className="job-prompt">“{j.prompt}”</div>
+                      <div className="job-prompt">
+                        “{j.prompt}”{j.attachedFrom && <span className="delegation-attached"> + {j.attachedFrom}’s answer</span>}
+                      </div>
                       {j.summary && <div className="job-summary">{j.summary}</div>}
                       {j.error && <div className="job-error">{j.error}</div>}
                     </div>

@@ -36,7 +36,10 @@ export function DelegationCard({ data }: { data: DelegationData }) {
           </span>
         </div>
       </div>
-      <div className="delegation-prompt">“{data.prompt}”</div>
+      <div className="delegation-prompt">
+        “{data.prompt}”{data.attachedFrom && <span className="delegation-attached"> + {data.attachedFrom}’s answer</span>}
+      </div>
+      {busy && data.status === 'waiting' && data.reply && <div className="delegation-live">{data.reply.trim().split('\n').filter(Boolean).pop()?.slice(-140)}</div>}
       {data.error && <div className="delegation-error">{data.error}</div>}
       {data.reply && data.status === 'done' && (
         <>

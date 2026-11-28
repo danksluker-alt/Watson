@@ -52,7 +52,7 @@ export const DEFAULT_SETTINGS: Settings = {
   returnFocusAfterHandoff: true,
   defaultAgent: 'claude',
   agents: AGENT_PRESETS,
-  pillShape: 'pill',
+  pillShape: 'circle',
   openWindowOnConfirm: true,
   pillPlace: null,
 }

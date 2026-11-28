@@ -13,6 +13,7 @@ import type { Block, MusicApp, Panel, Settings, StockRange, WidgetKind } from '@
 import type { Helper } from './helper'
 import type { ScreenChoice } from './pinned'
 import { getSecret, getSettings } from './settings'
+import { parseComparison } from './handoffText'
 import { record, spentToday } from './usage'
 import { getWeather, weatherForModel } from './tools/weather'
 import { getStock, stockForModel } from './tools/stocks'
@@ -38,7 +39,9 @@ export type ToolHost = {
   activity: (text: string) => string
   finishActivity: (id: string, ok: boolean, text?: string) => void
   /** Hand a request to another AI app. Resolves once it has been queued. */
-  delegate: (agentId: string, prompt: string, sensitive: boolean, newChat: boolean) => Promise<string>
+  delegate: (agentId: string, prompt: string, sensitive: boolean, newChat: boolean, attachPrevious: boolean) => Promise<string>
+  /** Ask several AIs the same thing; their answers are compared when all are in. */
+  askSeveral: (agentIds: string[], prompt: string, sensitive: boolean, attachPrevious: boolean) => Promise<string>
   /** Put a widget on a screen as a floating window. */
   pin: (kind: WidgetKind, params: Record<string, string>, screen: ScreenChoice) => Promise<string>
   unpin: (kind: WidgetKind | 'all') => void
@@ -82,7 +85,8 @@ const MusicInput = z.object({
   app: z.enum(['spotify', 'apple_music']).optional(),
 })
 const OpenInput = z.object({ kind: z.enum(['app', 'url', 'file']), target: z.string().min(1) })
-const DelegateInput = z.object({ agent: z.string(), request: z.string().min(1), sensitive: z.boolean(), new_chat: z.boolean().optional() })
+const DelegateInput = z.object({ agent: z.string(), request: z.string().min(1), sensitive: z.boolean(), new_chat: z.boolean().optional(), include_previous_answer: z.boolean().optional() })
+const AskSeveralInput = z.object({ agents: z.array(z.string()).min(1), request: z.string().min(1), sensitive: z.boolean(), include_previous_answer: z.boolean().optional() })
 const CalendarInput = z.object({ range: z.string().optional() })
 const AddEventInput = z.object({ title: z.string().min(1), start: z.string(), end: z.string().optional(), all_day: z.boolean().optional(), location: z.string().optional() })
 const RemindersInput = z.object({ list: z.string().optional() })
@@ -316,8 +320,29 @@ function toolDefs(settings: Settings): Anthropic.Beta.BetaToolUnion[] {
           request: { type: 'string', description: 'A clear, complete prompt written as the user, keeping every detail they gave.' },
           sensitive: { type: 'boolean', description: 'true if it would send, post, delete, buy or change something that cannot be undone' },
           new_chat: { type: 'boolean', description: 'false only when this follows up on the previous request to the same agent' },
+          include_previous_answer: {
+            type: 'boolean',
+            description: 'true when the user refers to an earlier AI answer ("send that to Claude", "ask Grok if this is right", "turn it into an email"): Watson pastes that full answer after the request, so do not copy it into request',
+          },
         },
         required: ['agent', 'request', 'sensitive'],
+      },
+    })
+  }
+  if (agents.length > 1) {
+    tools.push({
+      name: 'ask_several',
+      description:
+        'Ask two or more of the user\'s AIs the same thing at once and compare their answers side by side ("ask Claude and Grok", "compare what my AIs say", "ask everyone", "second opinion"). Watson types it into each app, waits for all of them in the background, then compares.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          agents: { type: 'array', items: { type: 'string', enum: agents.map((a) => a.id) }, description: 'Two or more agents; all of them for "everyone"' },
+          request: { type: 'string', description: 'A clear, complete prompt written as the user, keeping every detail they gave.' },
+          sensitive: { type: 'boolean', description: 'true if it would send, post, delete, buy or change something that cannot be undone' },
+          include_previous_answer: { type: 'boolean', description: 'true when the user asks the others to check or improve an earlier AI answer' },
+        },
+        required: ['agents', 'request', 'sensitive'],
       },
     })
   }
@@ -339,9 +364,11 @@ function systemPrompt(settings: Settings, spoken: boolean): string {
     'When the user wants something kept on screen ("pin", "keep it up", "put it on my other screen"), use pin_widget.',
     'Calendar events and reminders you add take effect right away: repeat back what you added.',
     'Use delegate for coding, website changes, email, calendar, documents and anything needing the user\'s connectors. Then say in a few words that you handed it off.',
+    'When the user names two or more AIs, says "compare", "ask everyone" or wants a second opinion, use ask_several once (not delegate twice). When they refer to an earlier AI answer ("send that to Claude"), set include_previous_answer.',
     'Never claim you did something you did not do. If you are unsure, say so.',
     'Answer only the newest request and call only the tools it needs. Your earlier replies in this conversation were based on real tool results (only their text is kept to save space): trust them, and never re-check, retract or "correct" them unless the user says something is wrong.',
     'Say each thing once: after a tool runs, do not add a closing line like "Done." or repeat what the widget shows.',
+    'If the user only says your name or "hey", reply with two or three words ("Yes?", "I\'m here."). Facts from the clock or a tool stand: if the user disputes one, restate it kindly instead of agreeing.',
     `Today is ${today}. Home city: ${settings.homeCity}. Units: °${settings.units}.`,
     memoryPrompt(),
   ]
@@ -777,12 +804,40 @@ export class Brain {
         }
       }
       case 'delegate': {
-        const { agent, request, sensitive, new_chat } = DelegateInput.parse(input)
-        return host.delegate(agent, request, sensitive, new_chat ?? true)
+        const { agent, request, sensitive, new_chat, include_previous_answer } = DelegateInput.parse(input)
+        return host.delegate(agent, request, sensitive, new_chat ?? true, include_previous_answer ?? false)
+      }
+      case 'ask_several': {
+        const { agents, request, sensitive, include_previous_answer } = AskSeveralInput.parse(input)
+        return host.askSeveral(agents, request, sensitive, include_previous_answer ?? false)
       }
       default:
         throw new Error(`Unknown tool ${name}`)
     }
+  }
+
+  /** Compare several agents' answers: where they agree, how they differ, and one line each. */
+  async compare(prompt: string, answers: { agent: string; reply: string }[]): Promise<{ spoken: string; takeaways: { agent: string; text: string }[] }> {
+    const settings = getSettings()
+    this.checkBudget(settings)
+    const client = this.getClient()
+    // Keep it cheap: each answer is clipped, and the comparison is one short Haiku call.
+    const per = Math.floor(16_000 / answers.length)
+    const body = answers.map((a) => `<answer from="${a.agent}">${a.reply.length > per ? `${a.reply.slice(0, per)}\n[…cut]` : a.reply}</answer>`).join('\n')
+    const message = await client.beta.messages.create({
+      model: HAIKU,
+      max_tokens: 700,
+      system: 'You are Watson, a voice assistant. You compare answers from the user\'s AI apps fairly and briefly. Output JSON only.',
+      messages: [
+        {
+          role: 'user',
+          content: `The user asked: <request>${prompt}</request>\n<answers>\n${body}\n</answers>\n\nReply with JSON only, no code fence: {"spoken": "2 or 3 spoken sentences, no markdown: what they agree on, the most important difference, and which answer is more complete or useful and why", "takeaways": [{"agent": "<name>", "text": "one short line: the gist of this answer and what only it adds"}]}`,
+        },
+      ],
+    })
+    record(HAIKU, message.usage)
+    const raw = message.content.map((b) => (b.type === 'text' ? b.text : '')).join('').trim()
+    return parseComparison(raw, answers.map((a) => a.agent))
   }
 
   /** Summarize another agent's answer for the ear, plus an optional panel. */
@@ -831,3 +886,4 @@ export class Brain {
     return { spoken: spoken.trim(), panel: blocks.length ? { ...meta, blocks } : null }
   }
 }
+

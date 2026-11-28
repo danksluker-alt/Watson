@@ -54,6 +54,19 @@
   `overlayPlacement()` keeps the 760×720 overlay on screen and tells the renderer the island's centre
   and whether the panel opens up or down (`UIState.layout`). Hold-to-move: renderer `useHoldToMove`
   → `pill:drag` start/end; main follows the cursor and saves the spot.
-- Glance (`refreshGlance`): next event from Calendar each minute, weather every 15 min; no API calls.
+- Pill: a circle at rest (`pillShape` default `circle`); `useLive` in `src/renderer/src/pill.tsx` turns it
+  into a status pill for active/just-finished hand-offs, comparisons, timers and an event within 10 min.
+  `refreshGlance` only reads the next Calendar event each minute (no weather, no API calls).
+- Several AIs at once: brain tool `ask_several` → `Delegations.startGroup` (jobs share `groupId`; typing
+  is serialized by `oneAtATime`, waiting is parallel) → `brain.compare` (one Haiku call, JSON parsed by
+  `parseComparison` in `src/main/handoffText.ts`) → `compare` block and `history.compares`.
+  `include_previous_answer` on `delegate`/`ask_several` pastes the last answer (`previousAnswer()` in
+  index.ts); `RISKY` checks only the user's request, never the attached answer.
 - Watson window (`#home`, `Home.tsx`): history from `src/main/history.ts` (history.json, capped),
   live state, hand-offs, and the pending confirmation. Opens on confirmations if `openWindowOnConfirm`.
+- Free data services (weather, stocks) go through `fetchRetry` (`src/main/tools/net.ts`): 7 s limit, one
+  retry, and a plain "can't reach the internet" message. A second hotkey press within 1.5 s of the one
+  that sent a request is ignored (double press), not treated as cancel.
+- Hold-to-move ends on a page-wide pointerup and when the pill turns into the panel mid-press; the main
+  process also stops following the cursor after 30 s. (A lost release once left the window glued to
+  the mouse.) Code lines in agent answers are never rejoined (`CODE` in `extract.ts`).

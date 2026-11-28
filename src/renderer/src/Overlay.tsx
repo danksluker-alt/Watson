@@ -10,8 +10,8 @@ import { Bars, Orb } from './components/Orb'
 import { play } from './sounds'
 import { Blocks } from './widgets/Blocks'
 import { AgentMark } from './widgets/Delegation'
-import { countdown, RingingCard } from './widgets/Timers'
-import { pillWidth, useGlance, useHoldToMove } from './pill'
+import { RingingCard } from './widgets/Timers'
+import { pillWidth, useHoldToMove, useLive } from './pill'
 
 const SPRING = { type: 'spring' as const, stiffness: 420, damping: 34, mass: 0.9 }
 const WIDTH = { pill: 168, compact: 500, panel: 680 }
@@ -72,18 +72,6 @@ function useSounds(s: UIState | null) {
     const t = setInterval(() => play('ring'), 2500)
     return () => clearInterval(t)
   }, [ringing])
-}
-
-/** The next timer's countdown, for the idle pill. */
-function useNextTimer(s: UIState | null): string | null {
-  const next = s?.timers.find((t) => t.kind === 'timer') ?? null
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!next) return
-    const t = setInterval(() => setNow(Date.now()), 500)
-    return () => clearInterval(t)
-  }, [next])
-  return next && next.endsAt > now ? countdown(next.endsAt - now) : null
 }
 
 // ---------------- Review editor ----------------
@@ -187,6 +175,15 @@ function DraftEditor({ s }: { s: UIState }) {
 
 // ---------------- Island ----------------
 
+const isReviewing = (s: UIState) => Boolean(s.draft) || (s.capture === 'review' && s.phase === 'listening' && Boolean(s.transcript))
+
+/** pill (resting or live status), compact (listening/thinking/speaking) or the full panel. */
+function modeOf(s: UIState, typing: boolean): Mode {
+  if (s.arranging) return 'pill'
+  const hasPanel = isReviewing(s) || Boolean(s.panel || s.confirm || s.error || s.notice || s.ringing || typing || (s.expanded && s.reply))
+  return hasPanel ? 'panel' : s.phase !== 'idle' ? 'compact' : 'pill'
+}
+
 export function Overlay() {
   const [s, setS] = useState<UIState | null>(null)
   const [typing, setTyping] = useState(false)
@@ -202,9 +199,7 @@ export function Overlay() {
     return off
   }, [])
   useSounds(s)
-  const nextTimer = useNextTimer(s)
-  const glance = useGlance(s?.glance ?? {})
-  const hold = useHoldToMove(() => window.watson.toggleListen())
+  const live = useLive(s)
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -222,15 +217,18 @@ export function Overlay() {
     setTimeout(() => inputRef.current?.focus(), 120)
   }, [typing])
 
+  const mode: Mode = s ? modeOf(s, typing) : 'pill'
+  const hold = useHoldToMove(() => window.watson.toggleListen(), mode === 'pill')
+
   if (!s) return null
 
   const jobs = s.jobs.filter((j) => !['done', 'failed'].includes(j.status))
-  const reviewing = Boolean(s.draft) || (s.capture === 'review' && s.phase === 'listening' && Boolean(s.transcript))
-  const hasPanel = reviewing || Boolean(s.panel || s.confirm || s.error || s.notice || s.ringing || typing || (s.expanded && s.reply))
-  const mode: Mode = s.arranging ? 'pill' : hasPanel ? 'panel' : s.phase !== 'idle' ? 'compact' : 'pill'
-  const circle = mode === 'pill' && s.pillShape === 'circle'
-  const pillText = jobs.length ? `${jobs[0].agent}${jobs.length > 1 ? ` +${jobs.length - 1}` : ''}` : nextTimer ?? (hover && !s.arranging ? '⌥ Space' : glance?.text ?? 'Watson')
-  const width = mode === 'pill' ? (circle ? 38 : pillWidth(pillText) + (jobs.length ? 18 : 0)) : WIDTH[mode]
+  const reviewing = isReviewing(s)
+  // At rest it's a circle (unless the user chose the pill); it grows to say what's going on.
+  const shown = s.arranging ? null : live
+  const circle = mode === 'pill' && s.pillShape === 'circle' && !shown
+  const pillText = shown?.text ?? (hover && !s.arranging ? '⌥ Space' : 'Watson')
+  const width = mode === 'pill' ? (circle ? 38 : pillWidth(pillText)) : WIDTH[mode]
   // Keep the island inside the window: near a screen edge it shifts instead of being cut off.
   const left = Math.max(8, Math.min(760 - width - 8, s.layout.centerX - width / 2))
   const up = s.layout.dir === 'up'
@@ -287,29 +285,21 @@ export function Overlay() {
                 transition={{ duration: 0.18 }}
                 title="Click to talk · hold to move"
               >
-                <Orb phase="idle" size={circle ? 22 : 18} />
-                {circle ? (
-                  (nextTimer || jobs.length > 0) && <span className="circle-badge" />
-                ) : jobs.length > 0 ? (
-                  <span className="pill-job">
-                    <span className="spinner" />
-                    {pillText}
-                  </span>
-                ) : nextTimer ? (
-                  <span className="pill-timer">
-                    <span className="pill-timer-dot" />
-                    {nextTimer}
-                  </span>
-                ) : (
+                <Orb phase={shown?.tone === 'job' ? 'thinking' : 'idle'} size={circle ? 22 : 18} />
+                {!circle && (
                   <AnimatePresence mode="popLayout" initial={false}>
                     <motion.span
-                      key={pillText}
-                      className={`pill-label${glance && pillText === glance.text ? ` glance ${glance.tone}` : ''}`}
+                      key={shown?.key ?? pillText}
+                      className={`pill-label${shown ? ` live ${shown.tone}` : ''}`}
                       initial={{ opacity: 0, y: up ? -8 : 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: up ? 8 : -8 }}
                       transition={{ duration: 0.28 }}
                     >
+                      {shown?.tone === 'timer' && <span className="pill-timer-dot" />}
+                      {shown?.tone === 'done' && <Check size={11} />}
+                      {shown?.tone === 'attention' && <Warning size={11} />}
+                      {shown?.tone === 'event' && <span className="pill-event-dot" />}
                       {pillText}
                     </motion.span>
                   </AnimatePresence>
