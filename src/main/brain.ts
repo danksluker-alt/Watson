@@ -50,6 +50,10 @@ export type ToolHost = {
 
 export class BudgetError extends Error {}
 
+/** What the model answers when something it heard wasn't meant for it. */
+export const SILENT = '<silent>'
+export const isSilent = (t: string) => /^<?silent>?\.?$/i.test(t.trim())
+
 // ---------------- Tool schemas ----------------
 
 const PanelBlock = z.discriminatedUnion('type', [
@@ -418,7 +422,11 @@ export class Brain {
     }
   }
 
-  async respond(text: string, opts: { spoken: boolean; signal: AbortSignal; host: ToolHost; onText: (delta: string) => void }): Promise<string> {
+  /**
+   * `unprompted`: heard without the hotkey (the seconds after an answer, or talking over Watson).
+   * The model may then answer SILENT when it wasn't meant for Watson; nothing is spoken or kept.
+   */
+  async respond(text: string, opts: { spoken: boolean; signal: AbortSignal; host: ToolHost; onText: (delta: string) => void; unprompted?: boolean }): Promise<string> {
     const settings = getSettings()
     this.checkBudget(settings)
     const client = this.getClient()
@@ -433,7 +441,11 @@ export class Brain {
     }
     const now = new Date().toLocaleString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })
     // The time goes on this message only, so the cached system prompt stays the same all day.
-    const messages: Msg[] = [...this.history, { role: 'user', content: `${text}\n\n(Local time: ${now})` }]
+    // The unprompted note also goes on this message, not the system prompt, to keep the cache.
+    const note = opts.unprompted
+      ? `\n(Heard without the user pressing the talk key, right after your last reply. If it isn't clearly meant for you (talking to someone else, thinking aloud, a fragment, a comment about you), reply with exactly ${SILENT} and nothing else.)`
+      : ''
+    const messages: Msg[] = [...this.history, { role: 'user', content: `${text}\n\n(Local time: ${now})${note}` }]
     const toolsUsed: string[] = []
     let finalText = ''
     let shown = ''
@@ -504,6 +516,10 @@ export class Brain {
     }
 
     console.log(`[watson] answered (${model === SONNET ? 'Sonnet' : 'Haiku'}, ${mode(opts.spoken)}) tools: ${toolsUsed.join(', ') || 'none'}`)
+    if (isSilent(finalText)) {
+      console.log('[watson] stayed quiet: not meant for Watson')
+      return SILENT
+    }
     // Keep only plain text in memory: small, cheap context next time.
     const remembered = finalText.trim() || (toolsUsed.length ? `(used ${[...new Set(toolsUsed)].join(', ')})` : '(no answer)')
     this.history.push({ role: 'user', content: text }, { role: 'assistant', content: remembered })

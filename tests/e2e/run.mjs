@@ -376,6 +376,26 @@ await scenario('Pill: corner position and circle shape stay on screen', async ()
   return 'bottom-right corner: panel opened upward, fully on screen; circle 38 px'
 })
 
+await scenario('Follow-up: a real question is answered, side talk is ignored', async () => {
+  await talk('What time is it in Tokyo and London?')
+  await until(async () => (await spokenText()).includes('Tokyo'), 10_000)
+  // Watson listens a few seconds for a follow-up, without the key.
+  await until(async () => (await helper('/state')).listening, 10_000)
+  await helper('/say', { text: 'And how tall is the Eiffel Tower?' })
+  await until(async () => (await spokenText()).includes('330 meters'), 10_000)
+  await until(async () => (await helper('/state')).listening, 10_000)
+  const before = (await helper('/state')).spoken.length
+  await helper('/say', { text: 'so anyway I told my friend it was fine' })
+  await until(async () => (await overlay.evaluate(() => window.watson.getState())).phase === 'idle', 10_000)
+  await sleep(800)
+  const st = await helper('/state')
+  assert(st.spoken.length === before, `said "${st.spoken.slice(before).join(' ')}" to side talk`)
+  assert(!st.listening, 'kept listening after side talk')
+  const h = await overlay.evaluate(() => window.watson.getHistory())
+  assert(!h.turns.some((t) => t.you.includes('my friend')), 'side talk was saved in the history')
+  return 'follow-up answered; side talk got no reply, wasn’t saved, and listening stopped'
+})
+
 await scenario('Ask two AIs at once; live pill; side-by-side comparison', async () => {
   await helper('/slow', { scale: 6 }) // the AIs take ~15 s, long enough to watch the pill
   await talk('Ask Claude and Grok what people think of the new iPhone camera')

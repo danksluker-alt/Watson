@@ -122,6 +122,8 @@ export function startMockApi(port) {
         return { text: `(mock could not read the tool result: ${e.message})`, tools: [] }
       }
     }
+    // Heard without the talk key and clearly not for Watson: stay quiet.
+    if (text.includes('Heard without the user pressing') && /my friend|anyway/i.test(text)) return { text: '<silent>', tools: [] }
     const p = plan(text)
     return { text: p.text ?? '', tools: (p.tools ?? []).filter((t) => toolNames.has(t.name)) }
   }

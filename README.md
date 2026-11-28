@@ -64,6 +64,11 @@ The GitHub Actions workflows in `.github/workflows` only run when started by han
   own when something needs confirming (Settings → Agents). History stays on this Mac
   (`history.json`); **Clear history** removes it.
 
+After it answers, Watson listens for a few seconds so you can just keep talking ("and tomorrow?").
+If what it hears isn't meant for it, like you talking to someone else or thinking aloud, it stays quiet
+and stops listening. Talking over Watson stops it, but answers from your AIs that are still waiting to be
+read aren't lost.
+
 ## Two ways to talk
 
 | | How | What happens |

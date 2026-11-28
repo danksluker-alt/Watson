@@ -77,6 +77,8 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
 
     // Recognition (main-thread state, except `request`, which the audio thread reads)
     var locale = "en-US"
+    /// Names the recognizer should expect (the user's AI apps), sent by `configure`.
+    var vocabulary: [String] = []
     var recognizer: SFSpeechRecognizer?
     let request = Locked<SFSpeechAudioBufferRecognitionRequest?>(nil)
     var task: SFSpeechRecognitionTask?
@@ -319,7 +321,10 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         req.shouldReportPartialResults = true
         if recognizer.supportsOnDeviceRecognition { req.requiresOnDeviceRecognition = true }
         if #available(macOS 13.0, *) { req.addsPunctuation = true }
-        req.contextualStrings = ["Watson", "Claude", "ChatGPT", "Grok", "Gemini", "Spotify", "Cowork"]
+        let names = Array(Set(["Watson", "Claude", "ChatGPT", "Grok", "Gemini", "Spotify", "Cowork"] + vocabulary))
+        // Whole phrases help more than single words ("and Grok" was once heard as nothing).
+        let phrases = names.filter { $0 != "Watson" && $0 != "Spotify" }.flatMap { ["ask \($0)", "and \($0)"] }
+        req.contextualStrings = Array((names + phrases).prefix(90))
         try ensureEngine()
         session += 1
         let sid = session
@@ -1237,6 +1242,7 @@ func handle(_ msg: [String: Any]) {
         if let v = msg["voiceId"] as? String { voice.voiceId = v.isEmpty ? nil : v }
         if let r = msg["rate"] as? Double { voice.rate = Float(r) }
         if let e = msg["echoCancellation"] as? Bool { voice.echoCancellation = e }
+        if let v = msg["vocabulary"] as? [String] { voice.vocabulary = v.filter { !$0.isEmpty } }
         reply(id)
     case "listen.start":
         do { try voice.startListening(silence: msg["silence"] as? Double); reply(id) }

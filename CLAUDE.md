@@ -70,3 +70,10 @@
 - Hold-to-move ends on a page-wide pointerup and when the pill turns into the panel mid-press; the main
   process also stops following the cursor after 30 s. (A lost release once left the window glued to
   the mouse.) Code lines in agent answers are never rejoined (`CODE` in `extract.ts`).
+- Unprompted speech (heard in a `watch` listen: the follow-up seconds or talking over Watson) is sent with
+  a note on the user message (not the system prompt, to keep the cache); the model answers `<silent>`
+  when it wasn't meant for Watson, and then nothing is spoken, saved or listened for. At most
+  `MAX_UNPROMPTED` (2) unprompted turns in a row re-arm follow-up listening. Barge-in and the hotkey no
+  longer drop `announceQueue` (agent answers waiting to be read); only dismiss does.
+- `configure` sends the enabled agents' names as `vocabulary`; the helper adds them and "ask X"/"and X"
+  phrases to the recognizer's `contextualStrings`.

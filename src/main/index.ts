@@ -1,7 +1,7 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } from 'electron'
 import path from 'node:path'
 import type { Block, InputMode, MusicApp, Panel, PermissionStatus, RunningApp, SecretName, Settings, StockRange, UIState, VoiceInfo } from '@shared/types'
-import { Brain, BudgetError, type ToolHost } from './brain'
+import { Brain, BudgetError, isSilent, SILENT, type ToolHost } from './brain'
 import { Delegations, joinNames } from './delegate'
 import { Helper, type HelperEvent } from './helper'
 import { PinnedWidgets } from './pinned'
@@ -404,6 +404,7 @@ function speakText(text: string) {
 }
 
 function startListening(kind: 'fresh' | 'watch') {
+  listenKind = kind
   if (!helper.ready) {
     store.set({ error: "Voice is off: the helper isn't running. You can still type.", expanded: true })
     return
@@ -470,6 +471,8 @@ function afterSpeech() {
     return
   }
   if (inputMode !== 'voice') return goIdle()
+  // Don't keep chaining on things that weren't addressed with the key (side talk).
+  if (unpromptedRun >= MAX_UNPROMPTED && !store.state.confirm) return goIdle()
   // Conversation mode: keep listening briefly for a follow-up.
   if (!listening) startListening('watch')
   store.set({ phase: 'listening', transcript: '' })
@@ -511,7 +514,7 @@ function onHelperEvent(e: HelperEvent) {
       console.log(`[watson] heard ${e.text.split(/\s+/).filter(Boolean).length} words (${store.state.capture})`)
       listening = false
       if (store.state.capture === 'review') appendDraft(e.text)
-      else void handleUtterance(e.text, 'voice')
+      else void handleUtterance(e.text, 'voice', listenKind === 'watch')
       break
     case 'nospeech':
       console.log('[watson] no speech')
@@ -524,7 +527,7 @@ function onHelperEvent(e: HelperEvent) {
       turnAbort?.abort()
       responding = false
       speakingActive = false
-      announceQueue.length = 0
+      // Answers from your AIs still waiting to be read stay queued; they're read after this turn.
       store.set({ phase: 'listening', transcript: '', reply: '' })
       break
     case 'speak.start':
@@ -546,12 +549,13 @@ function onHelperEvent(e: HelperEvent) {
 
 const YES = /^(yes|yeah|yep|sure|send( it)?|do it|go( ahead)?|confirm|ok(ay)?)\b/i
 const NO = /^(no|nope|cancel|stop|don'?t|never ?mind|wait)\b/i
-const BYE = /^(stop|cancel|never ?mind|nothing|that'?s (all|it)|thanks?|thank you|goodbye|bye)[.!]?$/i
+const BYE = /^(stop|stop listening|cancel|never ?mind|nothing|no|that'?s (all|it)|thanks?|thank you|goodbye|bye|be quiet|quiet|shut up|go away|not (you|now)|i'?m not talking to you)[.!]?$/i
 
-async function handleUtterance(raw: string, mode: 'voice' | 'text') {
+async function handleUtterance(raw: string, mode: 'voice' | 'text', unprompted = false) {
   const text = raw.trim()
   clearTimer('followUp')
   if (!text) return goIdle()
+  unpromptedRun = unprompted ? unpromptedRun + 1 : 0
   inputMode = mode
   store.set({ transcript: text, error: null })
 
@@ -573,10 +577,10 @@ async function handleUtterance(raw: string, mode: 'voice' | 'text') {
     store.set({ reply: '' })
     return goIdle()
   }
-  await runTurn(text, mode)
+  await runTurn(text, mode, unprompted && !store.state.confirm)
 }
 
-async function runTurn(text: string, mode: 'voice' | 'text') {
+async function runTurn(text: string, mode: 'voice' | 'text', unprompted = false) {
   turnAbort?.abort()
   if (speakingActive) helper.send('speak.stop')
   speakingActive = false
@@ -588,6 +592,8 @@ async function runTurn(text: string, mode: 'voice' | 'text') {
   store.set({ phase: 'thinking', reply: '', panel: null, activity: [], expanded: mode === 'text' || store.state.expanded })
   const thinking = store.activity('Thinking')
   let reply = ''
+  // An unprompted turn may come back as SILENT: hold its text until that's ruled out.
+  let held = unprompted
   const speaker = new Speaker((s) => {
     if (mode === 'voice' && !ac.signal.aborted) say(s)
   })
@@ -629,18 +635,41 @@ async function runTurn(text: string, mode: 'voice' | 'text') {
     },
   }
   try {
-    await brain.respond(text, {
+    const answer = await brain.respond(text, {
       spoken: mode === 'voice',
       signal: ac.signal,
       host,
+      unprompted,
       onText: (d) => {
         if (ac.signal.aborted) return
         reply += d
+        if (held) {
+          const t = reply.trimStart()
+          if (t.length < 9 && SILENT.startsWith(t.toLowerCase())) return // could still be SILENT
+          held = false
+          d = reply
+        }
         store.set({ reply })
         speaker.push(d)
       },
     })
     if (ac.signal.aborted) return
+    if (isSilent(answer) || (held && isSilent(reply))) {
+      // Not meant for Watson: say nothing, keep nothing, and stop listening.
+      store.removeActivity(thinking)
+      store.set({ reply: '', transcript: '' })
+      unpromptedRun = MAX_UNPROMPTED
+      if (turnAbort === ac) {
+        turnAbort = null
+        responding = false
+      }
+      return goIdle()
+    }
+    if (held) {
+      held = false
+      store.set({ reply })
+      speaker.push(reply)
+    }
     speaker.flush()
     store.removeActivity(thinking)
     const shown = turnPanel as Panel | null // set by tools during the turn
@@ -685,6 +714,11 @@ async function rememberInsertTarget() {
 }
 
 let lastHotkeyAt = 0
+/** How the current listen started: 'fresh' = the user pressed the key or clicked; 'watch' = on its own. */
+let listenKind: 'fresh' | 'watch' = 'fresh'
+/** Unprompted turns in a row; follow-up listening stops after MAX_UNPROMPTED. */
+let unpromptedRun = 0
+const MAX_UNPROMPTED = 2
 
 function onHotkey(mode: InputMode) {
   if (store.state.ringing) return stopRinging()
@@ -708,9 +742,9 @@ function onHotkey(mode: InputMode) {
       helper.send('speak.stop')
       return goIdle()
     case 'speaking':
+      // Stop talking and listen; answers from your AIs still waiting stay queued.
       turnAbort?.abort()
       responding = false
-      announceQueue.length = 0
       helper.send('speak.stop')
       store.set({ capture: mode })
       return startListening('fresh')
@@ -881,7 +915,8 @@ function previousAnswer(): { from: string; text: string } | undefined {
 // ---------------- Helper setup ----------------
 
 function configureHelper(s: Settings) {
-  helper.send('configure', { locale: s.speechLocale, voiceId: s.voiceId, rate: s.speechRate, echoCancellation: s.echoCancellation })
+  const vocabulary = [...new Set(s.agents.filter((a) => a.enabled).flatMap((a) => [a.name, a.name.split(/[\s(]/)[0]]))]
+  helper.send('configure', { locale: s.speechLocale, voiceId: s.voiceId, rate: s.speechRate, echoCancellation: s.echoCancellation, vocabulary })
 }
 
 async function maybeRequestPermissions() {
