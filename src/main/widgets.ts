@@ -8,6 +8,7 @@ import { getCalendar, getReminders } from './tools/calendar'
 import { worldClock } from './tools/clock'
 import { nowPlaying } from './tools/music'
 import { recentNotes, searchNotes } from './tools/notes'
+import { searchMail, unreadMail } from './tools/mail'
 import { getStock } from './tools/stocks'
 import { getWeather } from './tools/weather'
 import { timers } from './timers'
@@ -27,6 +28,8 @@ export async function buildWidget(helper: Helper, kind: WidgetKind, params: Widg
       return { type: 'reminders', data: await getReminders(helper, params.list || undefined) }
     case 'notes':
       return { type: 'notes', data: params.query ? await searchNotes(params.query) : await recentNotes(6) }
+    case 'mail':
+      return { type: 'mail', data: params.query ? await searchMail(params.query) : await unreadMail() }
     case 'clock':
       return { type: 'clock', data: await worldClock((params.cities || '').split(',').map((c) => c.trim()).filter(Boolean)) }
     case 'battery':
@@ -53,6 +56,8 @@ export function paramsOf(block: Block): { kind: WidgetKind; params: WidgetParams
       return { kind: 'reminders', params: block.data.list ? { list: block.data.list } : {} }
     case 'notes':
       return { kind: 'notes', params: block.data.query ? { query: block.data.query } : {} }
+    case 'mail':
+      return { kind: 'mail', params: block.data.query ? { query: block.data.query } : {} }
     case 'clock':
       return { kind: 'clock', params: { cities: block.data.cities.filter((c) => c.name !== 'Local').map((c) => c.name).join(',') } }
     case 'battery':
@@ -73,6 +78,7 @@ export const REFRESH: Record<WidgetKind, number> = {
   calendar: 300,
   reminders: 300,
   notes: 600,
+  mail: 300,
   clock: 3600,
   battery: 120,
   nowPlaying: 5,

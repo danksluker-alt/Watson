@@ -3,7 +3,8 @@
 A voice assistant for your Mac that lives in a small black circle at the top of the screen.
 Press **⌥ Space** (or click the circle) from any app and talk. Watson answers out loud. When
 an answer is better seen, the pill opens into a panel with live widgets: weather, stocks,
-your calendar, reminders, notes, world clocks, battery and what's playing. You can pin any
+your calendar, reminders, notes, contacts, unread mail, shortcuts, world clocks, battery and
+what's playing. You can pin any
 of those widgets to any screen.
 
 Watson is also an orchestrator. When a request needs one of your other AIs, it types the
@@ -137,6 +138,9 @@ Accessibility → Spoken Content, where they're a free download.
 | Clipboard | Reads copied text when you ask ("summarize what I copied") | free |
 | Find files | Spotlight (`mdfind`) in your home folder | free |
 | Notes (recent, search, read, create) | Apple Notes via AppleScript | free |
+| Contacts (find, read-only) | Apple Contacts via AppleScript: phones, emails, birthday, address | free |
+| Mail (unread, search; read-only) | Apple Mail via AppleScript: unread count and the newest 8 | free |
+| Shortcuts (list, run) | `/usr/bin/shortcuts`; running one always asks you first | free |
 | World clock | Time zones from Open-Meteo | free |
 | Battery | `pmset` | free |
 | Music | Spotify or Apple Music via AppleScript | free |
@@ -149,7 +153,7 @@ Accessibility → Spoken Content, where they're a free download.
 ### Widgets
 
 Apple doesn't let other apps embed macOS widgets. Watson reads the same data (EventKit,
-Notes, pmset, Spotify or Music) and draws its own widgets in the same style.
+Notes, Contacts, Mail, pmset, Spotify or Music) and draws its own widgets in the same style.
 
 - Say "pin my calendar", "put the weather on my other screen", or hover any widget and click 📌.
 - A pinned widget floats above other windows, can be dragged anywhere on any display,
@@ -162,7 +166,9 @@ Notes, pmset, Spotify or Music) and draws its own widgets in the same style.
   for you to say "send" or click **Send**.
 - Text you dictated, edited and sent yourself in review mode doesn't ask again.
 - Watson only opens web links and documents. It refuses to open scripts or installers. It can't
-  delete events, reminders or notes.
+  delete events, reminders or notes, and Contacts and Mail are read-only. A click on a contact's
+  phone or email only opens the Mac's own "Call?" prompt or an empty new email.
+- A shortcut runs only after you click **Run it**: shortcuts can send messages or delete things.
 - Keys are typed into Settings and encrypted with macOS Keychain.
 
 ## Developing on your Mac (Apple Silicon)
@@ -214,6 +220,8 @@ This builds `release/mac-arm64/Watson.app` with its icon, signed for your Mac on
 - "What's on my calendar today?" · "Add lunch with Ana tomorrow at 1"
 - "Remind me to call Mom at 6" · "Show my reminders"
 - "Show my recent notes" · "Make a note: ideas for the launch…"
+- "What's Ana's phone number?" · "Any unread email?" · "Find the email about the invoice"
+- "Show my shortcuts" · "Run my shortcut Morning" (asks first)
 - "What time is it in Tokyo and London?" · "How's my battery?"
 - "Play Midnight City" · "next song" · "pause"
 - "Pin the weather to my other screen" · "Remove the pinned widgets"
@@ -270,7 +278,7 @@ npm run e2e         # end-to-end scenarios (on Linux: npm run e2e:linux)
 
 - `tests/e2e/fake-helper.mjs` speaks the native helper's exact protocol. It simulates speech,
   the voice, barge-in, a Claude app and a browser running Grok that answer after a delay, and
-  Calendar, Reminders, Notes, Spotify and the battery.
+  Calendar, Reminders, Notes, Contacts, Mail, Shortcuts, Spotify and the battery.
 - `tests/e2e/mock-api.mjs` plays the Claude API (streaming and tool calls) and the weather and
   stock services.
 

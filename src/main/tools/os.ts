@@ -27,5 +27,15 @@ export const osascript = (script: string, timeoutMs = 10_000) => runOs('/usr/bin
 export const asString = (s: string) => `"${s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
 
 /** Field and record separators that can't appear in normal text. */
-export const FS = '\u001f'
-export const RS = '\u001e'
+export { FS, RS } from './appleParse'
+
+/**
+ * osascript for one app, with the friendly errors Notes uses: apps hang (rather than fail) while
+ * macOS asks whether Watson may control them, and -1743 means the user said no earlier.
+ */
+export const appScript = (appName: string, verb = 'reading') => (script: string, timeoutMs?: number) =>
+  osascript(script, timeoutMs).catch((e: Error) => {
+    if (/took too long/.test(e.message)) throw new Error(`${appName} didn’t answer. If macOS is asking whether Watson may control ${appName}, click OK, then try again.`)
+    if (/-1743|not allowed/i.test(e.message)) throw new Error(`macOS blocked Watson from ${verb} ${appName}. Allow it in System Settings → Privacy & Security → Automation → Watson → ${appName}.`)
+    throw e
+  })

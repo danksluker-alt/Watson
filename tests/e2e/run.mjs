@@ -486,6 +486,61 @@ await scenario('Notes, world clock and battery widgets', async () => {
   await shot('15-battery')
 })
 
+await scenario('Contacts card and unread mail widgets', async () => {
+  await talk("What's Ana's phone number?")
+  await overlay.waitForSelector('.contacts-w .contact', { timeout: 10_000 })
+  const names = await overlay.$$eval('.contacts-w .contact-name', (els) => els.map((e) => e.textContent))
+  assert(names[0] === 'Ana Lima' && names.includes('Anabel Costa') && !names.includes('Sam Okafor'), `contacts: ${names.join(', ')}`)
+  const card = await overlay.textContent('.contacts-w .contact')
+  assert(card.includes('mobile') && card.includes('+1 (415) 555-0134') && card.includes('ana@studionorte.com'), `card: ${card}`)
+  assert(card.includes('April 12, 1991') && card.includes('12 Rua Augusta, Lisbon, Portugal'), `birthday/address: ${card}`)
+  assert((await overlay.textContent('.contacts-w .contact-avatar')) === 'AL', 'initials avatar')
+  assert((await overlay.textContent('.contacts-w')).includes('September 3'), 'a birthday without a year')
+  await until(async () => (await spokenText()).includes('555-0134'), 10_000)
+  await shot('16-contacts')
+  await reset()
+  await talk('Any unread email?')
+  await overlay.waitForSelector('.mail-w .mail-row.unread', { timeout: 10_000 })
+  assert((await overlay.textContent('.mail-w .mail-count')) === '3', 'unread count in the header')
+  const rows = await overlay.$$eval('.mail-w .mail-row', (els) => els.map((e) => e.textContent))
+  assert(rows.length === 3 && rows[0].includes('Ana Lima') && rows[0].includes('Lunch moved to 1:30') && rows[2].includes('Product Weekly'), `rows: ${rows.join(' | ')}`)
+  assert(rows[0].includes('iCloud · INBOX') && rows[0].includes('push lunch to 1:30'), 'mailbox and snippet')
+  await until(async () => (await spokenText()).includes('3 unread'), 10_000)
+  // Read-only: nothing but the two lookups went to the Mac.
+  const scripts = (await helper('/state')).exec.map((e) => e.script)
+  assert(!scripts.some((x) => /\bsend\b|\bdelete\b|set read status|make new/i.test(x)), 'a script changed something')
+  await shot('17-mail')
+  return 'best match first, tappable rows, birthday and address; 3 unread, newest first'
+})
+
+await scenario('Shortcuts: running one asks first, and No runs nothing', async () => {
+  await talk('Run my shortcut Morning')
+  await overlay.waitForSelector('.confirm .btn.primary', { timeout: 10_000 })
+  assert((await overlay.textContent('.confirm')).includes('Morning'), 'the confirmation names the shortcut')
+  await sleep(600)
+  assert((await helper('/state')).shortcutRuns.length === 0, 'ran before the OK!')
+  await shot('18-shortcut-confirm')
+  await overlay.click('.confirm .btn.primary')
+  await overlay.waitForSelector('.shortcuts-w .sc-ran', { timeout: 10_000 })
+  assert(JSON.stringify((await helper('/state')).shortcutRuns) === '["Morning"]', 'ran once, by its exact name')
+  assert((await overlay.textContent('.shortcuts-w .sc-output')).includes('Good morning'), 'shows its output')
+  await until(async () => (await spokenText()).includes('Good morning'), 10_000)
+  // The confirmation brought the dashboard forward (openWindowOnConfirm), so the overlay folded: the result shows there.
+  const home = app.windows().find((w) => w.url().includes('#home'))
+  if (home && (await home.waitForSelector('.shortcuts-w .sc-ran', { timeout: 5000 }).catch(() => null))) {
+    await sleep(400)
+    await home.screenshot({ path: path.join(shots, '18b-shortcut-ran.png') })
+  } else await shot('18b-shortcut-ran')
+  await reset()
+  await talk('Run my shortcut Morning')
+  await overlay.waitForSelector('.confirm .btn:not(.primary)', { timeout: 10_000 })
+  await overlay.click('.confirm .btn:not(.primary)')
+  await until(async () => (await spokenText()).includes('didn’t run'), 10_000)
+  await sleep(500)
+  assert((await helper('/state')).shortcutRuns.length === 0, 'ran after No!')
+  return 'confirmed → ran once with output shown; declined → nothing ran'
+})
+
 await scenario('Timer: counts down in the pill, rings, stops', async () => {
   await talk('Set a tea timer for 12 seconds')
   await overlay.waitForSelector('.timers-w .timer-row', { timeout: 10_000 })

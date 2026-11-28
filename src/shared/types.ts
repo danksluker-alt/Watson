@@ -71,6 +71,38 @@ export type NotesData = {
   open?: { title: string; body: string; modified: number }
 }
 
+export type ContactPerson = {
+  id: string
+  name: string
+  organization?: string
+  phones: { label: string; value: string }[]
+  emails: { label: string; value: string }[]
+  /** Ready to show: "April 12" or "April 12, 1990". */
+  birthday?: string
+  /** The first address, on one line. */
+  address?: string
+}
+
+export type ContactsData = { query: string; people: ContactPerson[] }
+
+export type MailMessage = {
+  /** The Message-ID header (without < >), for opening it in Mail. */
+  id: string
+  sender: string
+  address?: string
+  subject: string
+  date: number
+  snippet: string
+  /** "iCloud · INBOX". */
+  mailbox: string
+  unread: boolean
+}
+
+export type MailData = { query?: string; unread: number; messages: MailMessage[] }
+
+/** The user's Shortcuts, or the one that just ran (only after they said yes). */
+export type ShortcutsData = { shortcuts: string[]; ran?: { name: string; output: string } }
+
 export type ClockData = { cities: { name: string; timeZone: string }[] }
 
 export type BatteryData = {
@@ -173,6 +205,9 @@ export type Block =
   | { type: 'calendar'; data: CalendarData }
   | { type: 'reminders'; data: RemindersData }
   | { type: 'notes'; data: NotesData }
+  | { type: 'contacts'; data: ContactsData }
+  | { type: 'mail'; data: MailData }
+  | { type: 'shortcuts'; data: ShortcutsData }
   | { type: 'clock'; data: ClockData }
   | { type: 'battery'; data: BatteryData }
   | { type: 'timers'; data: TimersData }
@@ -185,9 +220,9 @@ export type HistoryTurn = { id: string; at: number; mode: 'voice' | 'text'; you:
 export type HistoryData = { turns: HistoryTurn[]; jobs: (DelegationData & { at: number })[]; compares?: (CompareData & { at: number })[] }
 
 /** Widgets that can be pinned to a screen. */
-export type WidgetKind = 'weather' | 'stock' | 'calendar' | 'reminders' | 'notes' | 'clock' | 'battery' | 'nowPlaying' | 'timers'
+export type WidgetKind = 'weather' | 'stock' | 'calendar' | 'reminders' | 'notes' | 'mail' | 'clock' | 'battery' | 'nowPlaying' | 'timers'
 
-export const PINNABLE: Block['type'][] = ['weather', 'stock', 'calendar', 'reminders', 'notes', 'clock', 'battery', 'nowPlaying', 'timers']
+export const PINNABLE: Block['type'][] = ['weather', 'stock', 'calendar', 'reminders', 'notes', 'mail', 'clock', 'battery', 'nowPlaying', 'timers']
 
 export type PinnedWidget = {
   id: string

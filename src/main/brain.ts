@@ -24,6 +24,9 @@ import { macControl, type MacAction } from './tools/mac'
 import { findFiles } from './tools/files'
 import { forget, memories, memoryPrompt, remember } from './memory'
 import { createNote, notesForModel, readNote, recentNotes, searchNotes } from './tools/notes'
+import { contactsForModel, findContacts } from './tools/contacts'
+import { mailForModel, searchMail, unreadMail } from './tools/mail'
+import { findShortcut, listShortcuts, runShortcut } from './tools/shortcuts'
 import { clockForModel, worldClock } from './tools/clock'
 import { battery } from './tools/battery'
 import { spokenDuration, timerName, timers } from './timers'
@@ -101,6 +104,9 @@ const AddEventInput = z.object({ title: z.string().min(1), start: z.string(), en
 const RemindersInput = z.object({ list: z.string().optional() })
 const AddReminderInput = z.object({ title: z.string().min(1), due: z.string().optional(), list: z.string().optional() })
 const NotesInput = z.object({ action: z.enum(['recent', 'search', 'read', 'create']), query: z.string().optional(), title: z.string().optional(), body: z.string().optional() })
+const ContactsInput = z.object({ action: z.enum(['find']).optional(), query: z.string().min(1) })
+const MailInput = z.object({ action: z.enum(['unread', 'search']), query: z.string().optional() })
+const ShortcutsInput = z.object({ action: z.enum(['list', 'run']), name: z.string().optional() })
 const ClockInput = z.object({ cities: z.array(z.string()).max(5) })
 const MacInput = z.object({
   action: z.enum(['volume', 'volume_up', 'volume_down', 'mute', 'unmute', 'dark_mode', 'light_mode', 'toggle_appearance', 'sleep_display']),
@@ -127,7 +133,7 @@ const TimerInput = z.object({
   label: z.string().optional(),
   target: z.string().optional(),
 })
-const WIDGETS = ['weather', 'stock', 'calendar', 'reminders', 'notes', 'clock', 'battery', 'now_playing', 'timers'] as const
+const WIDGETS = ['weather', 'stock', 'calendar', 'reminders', 'notes', 'mail', 'clock', 'battery', 'now_playing', 'timers'] as const
 const PinInput = z.object({
   action: z.enum(['pin', 'unpin']),
   widget: z.enum([...WIDGETS, 'all']),
@@ -239,6 +245,33 @@ function toolDefs(settings: Settings): Anthropic.Beta.BetaToolUnion[] {
           title: { type: 'string', description: 'For create' },
           body: { type: 'string', description: 'For create: plain text, new lines allowed' },
         },
+        required: ['action'],
+      },
+    },
+    {
+      name: 'contacts',
+      description: 'Apple Contacts (read-only): find people by name and show their contact cards (phones, emails, birthday, address). Never calls or messages anyone.',
+      input_schema: {
+        type: 'object',
+        properties: { action: { type: 'string', enum: ['find'] }, query: { type: 'string', description: 'A name or part of one' } },
+        required: ['query'],
+      },
+    },
+    {
+      name: 'mail',
+      description: 'Apple Mail inbox (read-only): unread = unread count and the newest unread messages; search = newest messages whose subject or sender contains the query. Draws a mail widget. Cannot send, reply or delete (use delegate for that).',
+      input_schema: {
+        type: 'object',
+        properties: { action: { type: 'string', enum: ['unread', 'search'] }, query: { type: 'string', description: 'For search: words in the subject or the sender' } },
+        required: ['action'],
+      },
+    },
+    {
+      name: 'shortcuts',
+      description: 'Apple Shortcuts: list the user\'s shortcuts, or run one by name. Running always asks the user to OK it first.',
+      input_schema: {
+        type: 'object',
+        properties: { action: { type: 'string', enum: ['list', 'run'] }, name: { type: 'string', description: 'For run: the shortcut\'s name' } },
         required: ['action'],
       },
     },
@@ -396,7 +429,7 @@ function systemPrompt(settings: Settings, spoken: boolean): string {
       ? 'Your reply is spoken aloud: 1 to 3 short, natural sentences. No markdown, no lists, no URLs in what you say.'
       : 'The user typed this. Reply briefly in plain text.',
     'When an answer is better seen (steps, comparisons, tables, numbers, code), call show_panel and say only one sentence.',
-    'Widget tools (weather, stocks, music, calendar, reminders, notes, clock, battery) draw their own widgets; after using them, just say the key fact.',
+    'Widget tools (weather, stocks, music, calendar, reminders, notes, contacts, mail, shortcuts, clock, battery) draw their own widgets; after using them, just say the key fact.',
     'For "good morning", "brief me" or "how does my day look": call get_weather, get_calendar (today) and get_reminders together, then give a warm 2–3 sentence briefing. Never correct the user\'s greeting or the time of day; focus on what is still ahead today.',
     'Use memory to remember things only when the user asks you to remember or note something about themselves; to answer "where did I park" and similar, use what you remember.',
     'Timers and alarms ("set a timer for 10 minutes", "wake me at 7") use the timer tool; confirm the length or time in a few words.',
@@ -728,6 +761,68 @@ export class Brain {
         } catch (e) {
           host.finishActivity(a, false)
           throw new Error(`Notes: ${e instanceof Error ? e.message : e}`)
+        }
+      }
+      case 'contacts': {
+        const { query } = ContactsInput.parse(input)
+        const a = host.activity(`Looking up ${query} in Contacts`)
+        try {
+          const data = await findContacts(query)
+          if (data.people.length) host.addBlocks([{ type: 'contacts', data }])
+          host.finishActivity(a, true)
+          return JSON.stringify(contactsForModel(data))
+        } catch (e) {
+          host.finishActivity(a, false)
+          throw new Error(`Contacts: ${e instanceof Error ? e.message : e}`)
+        }
+      }
+      case 'mail': {
+        const m = MailInput.parse(input)
+        const search = m.action === 'search' && Boolean(m.query?.trim())
+        const a = host.activity(search ? `Looking for “${m.query}” in Mail` : 'Checking your mail')
+        try {
+          const data = search ? await searchMail(m.query ?? '') : await unreadMail()
+          host.addBlocks([{ type: 'mail', data }])
+          host.finishActivity(a, true)
+          return JSON.stringify(mailForModel(data))
+        } catch (e) {
+          host.finishActivity(a, false)
+          throw new Error(`Mail: ${e instanceof Error ? e.message : e}`)
+        }
+      }
+      case 'shortcuts': {
+        const s = ShortcutsInput.parse(input)
+        if (s.action === 'list') {
+          const a = host.activity('Opening your shortcuts')
+          try {
+            const all = await listShortcuts()
+            host.addBlocks([{ type: 'shortcuts', data: { shortcuts: all } }])
+            host.finishActivity(a, true)
+            return JSON.stringify({ count: all.length, names: all.slice(0, 40), widget: 'shown to the user already' })
+          } catch (e) {
+            host.finishActivity(a, false)
+            throw new Error(`Shortcuts: ${e instanceof Error ? e.message : e}`)
+          }
+        }
+        const { name, all } = await findShortcut(s.name ?? '').catch((e) => {
+          throw new Error(`Shortcuts: ${e instanceof Error ? e.message : e}`)
+        })
+        if (!name) {
+          const close = all.filter((n) => n.toLowerCase().includes((s.name ?? '').trim().toLowerCase().split(/\s+/)[0] ?? '')).slice(0, 8)
+          return `No shortcut matches "${s.name ?? ''}"; nothing was run. ${close.length ? `Similar: ${close.join(', ')}.` : `The user has ${all.length} shortcuts.`} Ask which one.`
+        }
+        // A shortcut can send messages, delete files or change settings: the user says yes first.
+        const ok = await host.confirm(`Run the shortcut “${name}”?`, 'Shortcuts can send messages, change settings or delete things. It runs only if you say yes.', 'Run it')
+        if (!ok) return `The user said no, so "${name}" was not run.`
+        const a = host.activity(`Running “${name}”`)
+        try {
+          const output = await runShortcut(name)
+          host.addBlocks([{ type: 'shortcuts', data: { shortcuts: [], ran: { name, output } } }])
+          host.finishActivity(a, true)
+          return output ? `Ran "${name}". Its output: ${output.slice(0, 600)}` : `Ran "${name}". It had no text output.`
+        } catch (e) {
+          host.finishActivity(a, false)
+          throw new Error(`Shortcuts: ${e instanceof Error ? e.message : e}`)
         }
       }
       case 'world_clock': {

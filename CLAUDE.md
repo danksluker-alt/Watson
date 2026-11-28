@@ -131,3 +131,8 @@
   absolutely placed at the ends, so they fade out without moving anything. e2e waits for the
   circle to settle before aiming at it. The fake helper moves any fixture event happening now/soon an hour out,
   so pill tests don't depend on the time of day.
+- Contacts, Mail, Shortcuts: `src/main/tools/contacts.ts`/`mail.ts` (read-only AppleScript via `appScript` in os.ts:
+  Notes-style timeout/-1743 errors) and `shortcuts.ts` (`/usr/bin/shortcuts`, execFile). Pure parsing in
+  `tools/appleParse.ts` (unit-tested). Mail reads dates of at most 60 messages and text of only the 8 shown.
+  Brain tool `shortcuts` run: exact name via `matchShortcut` (ambiguous = ask), then `host.confirm`, never
+  without a yes. Widget clicks open only `isAppLink` URLs (bare mailto, tel, message:). `mail` is pinnable.

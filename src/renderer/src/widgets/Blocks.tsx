@@ -1,7 +1,7 @@
 import { motion } from 'motion/react'
 import { PINNABLE, type Block } from '@shared/types'
 import { Pin } from '../components/Icons'
-import { BatteryWidget, CalendarWidget, ClockWidget, NotesWidget, RemindersWidget } from './Apple'
+import { BatteryWidget, CalendarWidget, ClockWidget, ContactsWidget, MailWidget, NotesWidget, RemindersWidget, ShortcutsWidget } from './Apple'
 import { BarChart, LineChart } from '../components/Charts'
 import { Markdown } from '../components/Markdown'
 import { ChoicesCard } from './Choices'
@@ -113,6 +113,12 @@ export function BlockView({ block }: { block: Block }) {
       return <RemindersWidget data={block.data} />
     case 'notes':
       return <NotesWidget data={block.data} />
+    case 'contacts':
+      return <ContactsWidget data={block.data} />
+    case 'mail':
+      return <MailWidget data={block.data} />
+    case 'shortcuts':
+      return <ShortcutsWidget data={block.data} />
     case 'clock':
       return <ClockWidget data={block.data} />
     case 'battery':

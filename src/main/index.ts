@@ -11,6 +11,7 @@ import { Speaker } from './speaker'
 import { Store } from './store'
 import * as music from './tools/music'
 import { setExecBridge } from './tools/os'
+import { isAppLink } from './tools/appleParse'
 import { installedApps } from './tools/apps'
 import { history } from './history'
 import { getStock } from './tools/stocks'
@@ -1249,7 +1250,9 @@ function registerIpc() {
   // Accessibility → Spoken Content, where Siri and Premium voices are downloaded (free).
   ipcMain.on('ui:openVoiceSettings', () => void shell.openExternal('x-apple.systempreferences:com.apple.Accessibility-Settings.extension?SpokenContent'))
   ipcMain.on('ui:openExternal', (_e, url: string) => {
-    if (/^https?:\/\//.test(url)) void shell.openExternal(url)
+    if (typeof url !== 'string') return
+    // Contact and mail widgets: an empty new email, a phone number, a Mail message. Nothing is sent.
+    if (/^https?:\/\//.test(url) || isAppLink(url)) void shell.openExternal(url)
   })
   ipcMain.on('ui:setCapture', (_e, mode: InputMode) => {
     // Going live with an open box: its words wait in the pill instead of hiding the answer.

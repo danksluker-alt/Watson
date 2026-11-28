@@ -4,7 +4,7 @@
 // It simulates: speech recognition (driven by POST /say on the control port),
 // the voice (speak → speak.start / speak.idle), barge-in, other apps (a Claude
 // Mac app and a browser running Grok that answer after a delay), Calendar,
-// Reminders, Notes, Spotify and the battery.
+// Reminders, Notes, Contacts, Mail, Shortcuts, Spotify and the battery.
 import http from 'node:http'
 import readline from 'node:readline'
 
@@ -16,7 +16,7 @@ const out = (obj) => process.stdout.write(JSON.stringify(obj) + '\n')
 const reply = (id, data, ok = true, error) => id && out({ ev: 'result', id, ok, ...(data !== undefined ? { data } : {}), ...(error ? { error } : {}) })
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
-const log = { spoken: [], sent: [], inserted: [], exec: [], calendarAdds: [], reminderAdds: [], reminderDone: [], commands: [] }
+const log = { spoken: [], sent: [], inserted: [], exec: [], calendarAdds: [], reminderAdds: [], reminderDone: [], shortcutRuns: [], commands: [] }
 let listening = false
 /** Listening for "Hey Watson" (on-device in the real helper). */
 let waking = false
@@ -127,6 +127,23 @@ const notes = [
   ['n3', 'Ideas for Watson', iso(3, 22), 'Projects', 'Ideas for Watson\nPin widgets on the second screen; morning briefing'],
 ]
 
+// Contacts: id, name, organization, phones (label US value GS …), emails, birthday (ISO), address.
+const GS = '\u001d'
+const US = '\u001c'
+const people = [
+  ['p1', 'Ana Lima', 'Studio Norte', [['_$!<Mobile>!$_', '+1 (415) 555-0134'], ['_$!<Work>!$_', '+1 415 555 0199']], [['_$!<Work>!$_', 'ana@studionorte.com']], '1991-04-12T00:00:00', '12 Rua Augusta\nLisbon\nPortugal'],
+  ['p2', 'Anabel Costa', '', [['iPhone', '+351 912 345 678']], [['_$!<Home>!$_', 'anabel@example.com']], '1604-09-03T00:00:00', ''],
+  ['p3', 'Sam Okafor', 'Acme', [['_$!<Mobile>!$_', '+1 212 555 0110']], [], '', ''],
+]
+// Mail: message id, sender, subject, date received, mailbox, account, read, text.
+const mails = [
+  ['m1@studionorte.com', 'Ana Lima <ana@studionorte.com>', 'Lunch moved to 1:30', iso(0, 10), 'INBOX', 'iCloud', 'false', 'Hi! Can we push lunch to 1:30? The studio review is running long. I booked the table by the window.'],
+  ['m2@acme.com', 'Sam Okafor <sam@acme.com>', 'Invoice #2041', iso(0, 8), 'INBOX', 'Work', 'false', 'Attached is the invoice for November. Payment terms are the usual 30 days.'],
+  ['m3@news.example.com', '"Product Weekly" <hello@news.example.com>', 'Five launches worth a look', iso(1, 7), 'INBOX', 'iCloud', 'false', 'This week: a voice assistant that lives in your menu bar, and more.'],
+  ['m4@studionorte.com', 'Ana Lima <ana@studionorte.com>', 'Re: Press kit', iso(3, 16), 'INBOX', 'iCloud', 'true', 'Looks great, sending it to the printer tomorrow.'],
+]
+const shortcutNames = ['Morning', 'Log Water', 'Text Mom I’m on my way', 'Focus: Deep Work']
+
 function execFake(cmd, args) {
   const script = args.join(' ')
   log.exec.push({ cmd, script: script.slice(0, 400) })
@@ -140,6 +157,27 @@ function execFake(cmd, args) {
       return [n[1], n[2], n[4]].join(FS)
     }
     return notes.map((n) => [n[0], n[1], n[2], n[3], n[4].slice(0, 160)].join(FS)).join(RS) + RS
+  }
+  if (script.includes('application "Contacts"')) {
+    const q = (/people whose name contains "([^"]*)"/.exec(script)?.[1] ?? '').toLowerCase()
+    return people
+      .filter((p) => p[1].toLowerCase().includes(q))
+      .map(([pid, name, org, phones, emails, bd, addr]) => [pid, name, org, phones.map((x) => x.join(US) + GS).join(''), emails.map((x) => x.join(US) + GS).join(''), bd, addr].join(FS))
+      .join(RS) + RS
+  }
+  if (script.includes('application "Mail"')) {
+    const q = (/subject contains "([^"]*)"/.exec(script)?.[1] ?? '').toLowerCase()
+    const unread = mails.filter((m) => m[6] === 'false')
+    const shown = q ? mails.filter((m) => m[2].toLowerCase().includes(q) || m[1].toLowerCase().includes(q)) : unread
+    return String(unread.length) + RS + shown.map((m) => m.join(FS)).join(RS) + RS
+  }
+  if (cmd.endsWith('/shortcuts')) {
+    if (args[0] === 'list') return shortcutNames.join('\n')
+    if (args[0] === 'run') {
+      log.shortcutRuns.push(args[1])
+      return args[1] === 'Morning' ? 'Good morning! 4 events today; first up is standup at 9:30.' : ''
+    }
+    return ''
   }
   if (script.includes('application "Spotify"') || script.includes('application "Music"')) {
     if (script.includes('player state is stopped')) return 'Midnight City|M83|Hurry Up, We’re Dreaming||243000|87.2|playing'

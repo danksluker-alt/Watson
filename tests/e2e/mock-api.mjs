@@ -71,6 +71,9 @@ export function startMockApi(port) {
       const req = text.replace(/^(ask|have|tell) claude( to)?/i, '').trim().replace(/^./, (c) => c.toUpperCase())
       return { tools: [{ name: 'delegate', input: { agent: 'claude', request: req, sensitive: /email|send/.test(t) } }] }
     }
+    if (/phone number|contact card/.test(t)) return { tools: [{ name: 'contacts', input: { action: 'find', query: /(?:what's |for )?([a-z]+)'s/.exec(t)?.[1]?.replace(/^./, (c) => c.toUpperCase()) ?? 'Ana' } }] }
+    if (/unread (email|mail)/.test(t)) return { tools: [{ name: 'mail', input: { action: 'unread' } }] }
+    if (/^run my shortcut /.test(t)) return { tools: [{ name: 'shortcuts', input: { action: 'run', name: text.replace(/^run my shortcut /i, '').replace(/[.?!]$/, '') } }] }
     if (/turn off my mac at/.test(t)) return { tools: [{ name: 'automation', input: { action: 'create', do: 'shut_down', time: '23:00', repeat: 'daily' } }] }
     if (/\btimer\b/.test(t)) return { tools: [{ name: 'timer', input: { action: 'start', seconds: Number(/(\d+) second/.exec(t)?.[1] ?? 600), label: t.includes('tea') ? 'tea' : undefined } }] }
     if (t.startsWith('check off')) return { tools: [{ name: 'complete_reminder', input: { title: text.slice(10).replace(/[.?!]$/, '') } }] }
@@ -105,6 +108,15 @@ export function startMockApi(port) {
     if (results.some((x) => x.is_error)) return `Sorry, that didn't work: ${r.slice(0, 120)}`
     const t = text.toLowerCase()
     if (/turn off my mac at/.test(t)) return r.split(' Watson must')[0]
+    if (/phone number|contact card/.test(t)) {
+      const p = JSON.parse(r).people[0]
+      return `${p.name}'s ${p.phones[0].split(' ')[0]} is ${p.phones[0].split(' ').slice(1).join(' ')}.`
+    }
+    if (/unread (email|mail)/.test(t)) {
+      const j = JSON.parse(r)
+      return `You have ${j.unread} unread emails. The newest is from ${j.messages[0].replace(/^• /, '').split(':')[0]}.`
+    }
+    if (/^run my shortcut /.test(t)) return r.includes('said no') ? 'Okay, I didn’t run it.' : `Done. ${r.split('Its output: ')[1] ?? 'It ran.'}`
     if (t.startsWith('pin ') || /\btimer\b/.test(t) || t.startsWith('check off') || t.startsWith('remember') || t.includes('volume')) return r.split('. It ends')[0] + '.'
     if (/^ask (claude and grok|everyone)/.test(t)) return 'I’ve asked Claude and Grok. I’ll compare their answers when they’re in.'
     if (/^send that to claude/.test(t)) return 'I’ve passed it to Claude.'
