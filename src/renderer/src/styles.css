@@ -3755,57 +3755,97 @@ html[data-view='home'] body {
   margin-left: -1px;
 }
 
-.round-btn {
-  width: 32px;
-  height: 32px;
+.tools {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.07);
+}
+
+.tool {
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   display: grid;
   place-items: center;
-  color: var(--label-2);
-  transition: background 0.18s, color 0.18s, transform 0.12s;
+  color: rgba(235, 235, 245, 0.62);
+  transition: background 0.22s ease, color 0.22s ease, transform 0.18s cubic-bezier(0.3, 1.4, 0.5, 1);
 }
 
-.round-btn:hover {
+.tool:hover {
   background: rgba(255, 255, 255, 0.09);
-  color: var(--label);
+  color: #fff;
 }
 
-.round-btn:active,
-.send-round:active {
+.tool:active {
+  transform: scale(0.88);
+}
+
+.tool.live:hover {
+  color: #d9a6ff;
+  background: rgba(191, 90, 242, 0.14);
+}
+
+.tool.danger:hover {
+  color: #ff6961;
+  background: rgba(255, 69, 58, 0.13);
+}
+
+.tool-sep {
+  width: 1px;
+  height: 14px;
+  margin: 0 3px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+/* Send: a quiet glass circle until there is something to send, then it lights up. */
+.send-round {
+  width: 34px;
+  height: 34px;
+  margin-left: 6px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: rgba(235, 235, 245, 0.32);
+  background: rgba(255, 255, 255, 0.07);
+  box-shadow: inset 0 0 0 0.5px rgba(255, 255, 255, 0.08);
+  transition:
+    background 0.3s ease,
+    color 0.3s ease,
+    box-shadow 0.3s ease,
+    transform 0.3s cubic-bezier(0.3, 1.5, 0.5, 1);
+}
+
+.send-round.ready {
+  color: #fff;
+  background: linear-gradient(180deg, #3d9bff 0%, #0a7aff 100%);
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.35),
+    0 6px 18px rgba(10, 132, 255, 0.38);
+  transform: scale(1.04);
+}
+
+.send-round.ready:hover {
+  transform: scale(1.1);
+  box-shadow:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.4),
+    0 8px 22px rgba(10, 132, 255, 0.5);
+}
+
+.send-round.ready:active {
   transform: scale(0.92);
 }
 
-.round-btn.live:hover {
-  color: #d9a6ff;
+.send-round svg {
+  transition: transform 0.3s cubic-bezier(0.3, 1.5, 0.5, 1);
 }
 
-.bar-sep {
-  width: 0.5px;
-  height: 16px;
-  margin: 0 4px;
-  background: var(--hairline);
-}
-
-.send-round {
-  width: 32px;
-  height: 32px;
-  margin-left: 4px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  background: #0a84ff;
-  box-shadow: 0 4px 14px rgba(10, 132, 255, 0.4);
-  transition: background 0.2s, opacity 0.2s, transform 0.12s, box-shadow 0.2s;
-}
-
-.send-round:hover {
-  background: #2b95ff;
-}
-
-.send-round:disabled {
-  opacity: 0.35;
-  box-shadow: none;
+.send-round.ready svg {
+  transform: translateY(-0.5px);
 }
 
 /* ---- Pill shortcuts on hover ---- */

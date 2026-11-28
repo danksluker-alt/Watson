@@ -204,7 +204,7 @@ await scenario('An unsent message is kept when you click away', async () => {
     await overlay.waitForSelector('.draft textarea', { timeout: 5000 })
     assert((await overlay.inputValue('.draft textarea')).includes('spent a while'), 'the edited text came back different')
     assert(!(await helper('/state')).listening, 'reopening a draft turned the mic on')
-    await overlay.click('.round-btn[aria-label="Discard"]')
+    await overlay.click('.tool[aria-label="Discard"]')
     await until(async () => !fs.existsSync(path.join(userData, 'draft.json')), 4000)
     return 'Esc kept it in the pill, a click brought it back, Discard removed it'
   } finally {
@@ -254,6 +254,8 @@ await scenario('Hovering the pill shows the dashboard and live talk', async () =
   // Start away from it, so moving onto it counts as arriving.
   await overlay.mouse.move(5, 700)
   await until(async () => (await overlay.$('.pill')) !== null, 4000)
+  // Wait until the island has finished closing into the circle before aiming at it.
+  await until(async () => (await overlay.evaluate(() => document.querySelector('.island').getBoundingClientRect().width)) <= 40, 4000)
   await sleep(300)
   const box = await overlay.$eval('.island', (el) => {
     const r = el.getBoundingClientRect()
@@ -278,7 +280,7 @@ await scenario('Talk live from the dictation box', async () => {
     await until(async () => (await helper('/state')).listening, 4000)
     await helper('/say', { text: 'How tall is the Eiffel Tower?' })
     await overlay.waitForSelector('.draft textarea', { timeout: 8000 })
-    await overlay.click('.round-btn.live')
+    await overlay.click('.tool.live')
     await until(async () => (await spokenText()).includes('330 meters'), 10_000)
     // Live: it keeps listening for a follow-up.
     await until(async () => (await helper('/state')).listening, 10_000)

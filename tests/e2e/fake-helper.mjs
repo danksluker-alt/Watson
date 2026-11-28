@@ -93,7 +93,7 @@ function at(dayOffset, h, m = 0) {
   d.setHours(h, m, 0, 0)
   return d.getTime() / 1000
 }
-const events = [
+const rawEvents = [
   { title: 'Team standup', start: at(0, 9, 30), end: at(0, 9, 45), allDay: false, calendar: 'Work', color: '#0A84FF' },
   { title: 'Design review', start: at(0, 11, 30), end: at(0, 12, 30), allDay: false, calendar: 'Work', color: '#0A84FF', location: 'Studio' },
   { title: 'Lunch with Ana', start: at(0, 13, 0), end: at(0, 14, 0), allDay: false, calendar: 'Personal', color: '#30D158' },
@@ -101,6 +101,12 @@ const events = [
   { title: 'Mom’s birthday', start: at(1, 0), end: at(2, 0), allDay: true, calendar: 'Family', color: '#FF375F' },
   { title: 'Investor call', start: at(1, 10, 0), end: at(1, 11, 0), allDay: false, calendar: 'Work', color: '#0A84FF' },
 ]
+// An event happening now or soon would turn the resting pill into an "up next" pill and make the pill
+// tests depend on the time of day; such an event moves to an hour from now (keeping its length).
+const nowSec = Date.now() / 1000
+const events = rawEvents.map((e) =>
+  !e.allDay && e.start < nowSec + 40 * 60 && e.end > nowSec - 60 ? { ...e, start: nowSec + 3600, end: nowSec + 3600 + (e.end - e.start) } : e
+)
 const reminders = [
   { id: 'r1', title: 'Renew passport', list: 'Personal', color: '#FF9F0A', priority: 1, due: at(-1, 17) },
   { id: 'r2', title: 'Send invoice to Acme', list: 'Work', color: '#0A84FF', priority: 0, due: at(0, 16) },

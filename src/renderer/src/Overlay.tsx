@@ -14,6 +14,21 @@ import { RingingCard } from './widgets/Timers'
 import { pillWidth, useHoldToMove, useLive } from './pill'
 
 const SPRING = { type: 'spring' as const, stiffness: 420, damping: 34, mass: 0.9 }
+// The island's shape: opening has a little life in it, closing settles softly with no bounce.
+// Growing goes wide first, then tall; shrinking folds up first, then narrows, like a sheet being put away.
+const GROW = { type: 'spring' as const, visualDuration: 0.5, bounce: 0.2 }
+const SHRINK = { type: 'spring' as const, visualDuration: 0.52, bounce: 0.04 }
+const islandTransition = (growing: boolean) =>
+  growing
+    ? { default: GROW, left: GROW, width: GROW, height: { ...GROW, delay: 0.05 }, borderRadius: GROW, scale: SPRING }
+    : { default: SHRINK, left: { ...SHRINK, delay: 0.07 }, width: { ...SHRINK, delay: 0.07 }, height: SHRINK, borderRadius: SHRINK, scale: SPRING }
+// What's inside cross-fades: the old view leaves quickly, the new one arrives once the shape is on its way.
+const EASE_OUT = [0.22, 1, 0.36, 1] as const
+const contentMotion = {
+  initial: { opacity: 0, scale: 0.97, filter: 'blur(6px)' },
+  animate: { opacity: 1, scale: 1, filter: 'blur(0px)', transition: { duration: 0.34, delay: 0.07, ease: EASE_OUT } },
+  exit: { opacity: 0, scale: 0.98, filter: 'blur(4px)', transition: { duration: 0.14, ease: [0.4, 0, 1, 1] as const } }
+}
 const WIDTH = { pill: 168, compact: 500, dictate: 560, panel: 680 }
 type Mode = keyof typeof WIDTH
 
@@ -233,21 +248,36 @@ function DraftEditor({ s }: { s: UIState }) {
             )}
           </motion.div>
           <span className="flex" />
-          {!more && (
-            <>
-              <button className="round-btn" onClick={() => window.watson.dictate(text)} aria-label="Keep talking" title="Keep talking">
-                <Mic size={15} />
-              </button>
-              <button className="round-btn live" onClick={() => window.watson.talkLive(to === 'watson' ? text : '')} aria-label="Talk live" title="Talk live">
-                <Wave size={15} />
-              </button>
-              <span className="bar-sep" />
-              <button className="round-btn" onClick={() => window.watson.cancelDraft()} aria-label="Discard" title="Discard">
-                <Trash size={15} />
-              </button>
-            </>
-          )}
-          <button className="send-round send-btn" onClick={send} disabled={!text.trim()} aria-label={label} title={`${label} (Return)`}>
+          <AnimatePresence initial={false}>
+            {!more && (
+              <motion.div
+                key="tools"
+                className="tools"
+                initial={{ opacity: 0, x: 8, scale: 0.96 }}
+                animate={{ opacity: 1, x: 0, scale: 1 }}
+                exit={{ opacity: 0, x: 8, scale: 0.96 }}
+                transition={{ type: 'spring', visualDuration: 0.3, bounce: 0.15 }}
+              >
+                <button className="tool" onClick={() => window.watson.dictate(text)} aria-label="Keep talking" title="Keep talking">
+                  <Mic size={15} />
+                </button>
+                <button className="tool live" onClick={() => window.watson.talkLive(to === 'watson' ? text : '')} aria-label="Talk live" title="Talk live">
+                  <Wave size={15} />
+                </button>
+                <span className="tool-sep" />
+                <button className="tool danger" onClick={() => window.watson.cancelDraft()} aria-label="Discard" title="Discard">
+                  <Trash size={15} />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          <button
+            className={text.trim() ? 'send-round send-btn ready' : 'send-round send-btn'}
+            onClick={send}
+            disabled={!text.trim()}
+            aria-label={label}
+            title={`${label} (Return)`}
+          >
             <ArrowUp size={16} />
           </button>
         </div>
@@ -318,6 +348,8 @@ export function Overlay() {
     return () => clearTimeout(t)
   }, [hover])
   const [contentRef, contentH] = useMeasuredHeight()
+  const prevArea = useRef(0)
+  const growDir = useRef(true)
 
   useEffect(() => {
     const off = window.watson.onState(setS)
@@ -354,6 +386,12 @@ export function Overlay() {
   // Keep the island inside the window: near a screen edge it shifts instead of being cut off.
   const left = Math.max(8, Math.min(760 - width - 8, s.layout.centerX - width / 2))
   const up = s.layout.dir === 'up'
+  const height = circle ? 38 : contentH || 38
+  const area = width * height
+  // Re-renders at the same size keep the direction the island is already moving in.
+  if (area !== prevArea.current) growDir.current = area > prevArea.current
+  prevArea.current = area
+  const growing = growDir.current
 
   const enter = () => {
     setHover(true)
@@ -378,9 +416,9 @@ export function Overlay() {
         onMouseLeave={leave}
         initial={false}
         style={up ? { bottom: 4, top: 'auto', transformOrigin: '50% 100%' } : { top: 4, bottom: 'auto', transformOrigin: '50% 0%' }}
-        animate={{ left, width, height: circle ? 38 : contentH || 38, borderRadius: mode === 'pill' ? 19 : mode === 'compact' ? 31 : mode === 'dictate' ? 26 : 28, scale: hold.holding ? 1.08 : 1 }}
+        animate={{ left, width, height, borderRadius: mode === 'pill' ? 19 : mode === 'compact' ? 31 : mode === 'dictate' ? 26 : 28, scale: hold.holding ? 1.08 : 1 }}
         whileHover={mode === 'pill' && !hold.holding ? { scale: 1.04 } : undefined}
-        transition={SPRING}
+        transition={islandTransition(growing)}
       >
         <div ref={contentRef} className="island-content" style={{ width }}>
           <AnimatePresence mode="popLayout" initial={false}>
@@ -399,10 +437,7 @@ export function Overlay() {
                   e.preventDefault()
                   window.watson.pillMenu()
                 }}
-                initial={{ opacity: 0, filter: 'blur(6px)' }}
-                animate={{ opacity: 1, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, filter: 'blur(6px)' }}
-                transition={{ duration: 0.18 }}
+                {...contentMotion}
                 title="Click to talk · right-click for more · hold to move"
               >
                 <AnimatePresence initial={false}>
@@ -475,10 +510,7 @@ export function Overlay() {
                 key="compact"
                 className="compact"
                 onClick={() => window.watson.toggleListen()}
-                initial={{ opacity: 0, filter: 'blur(8px)' }}
-                animate={{ opacity: 1, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, filter: 'blur(8px)' }}
-                transition={{ duration: 0.2 }}
+                {...contentMotion}
               >
                 <Orb phase={s.phase} size={34} />
                 <div
@@ -513,10 +545,7 @@ export function Overlay() {
               <motion.div
                 key="dictate"
                 className="dictate"
-                initial={{ opacity: 0, filter: 'blur(8px)' }}
-                animate={{ opacity: 1, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, filter: 'blur(8px)' }}
-                transition={{ duration: 0.2 }}
+                {...contentMotion}
               >
                 {s.error && <ErrorCard message={s.error} />}
                 {s.notice && <div className="card notice">{s.notice}</div>}
@@ -528,10 +557,7 @@ export function Overlay() {
               <motion.div
                 key="panel"
                 className="panel"
-                initial={{ opacity: 0, y: -8, filter: 'blur(8px)' }}
-                animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }}
-                exit={{ opacity: 0, filter: 'blur(8px)' }}
-                transition={{ duration: 0.22 }}
+                {...contentMotion}
               >
                 <header className="panel-head">
                   <button className="orb-btn" onClick={() => window.watson.toggleListen()} aria-label="Talk">

@@ -123,3 +123,7 @@
 - Confirmations queue (`confirmQueue`); Esc declines all. Queued announcements carry their panel and show
   it when read. `ui:cancel`, helper exit, and voice-output failure all end in idle (never stuck thinking).
   `syncWake` also runs after dismiss, stopped speech, confirm answers and agent drafts.
+- Island motion (`islandTransition` in Overlay.tsx): growing = lively spring, wide first then tall; shrinking =
+  soft no-bounce spring, folds up first then narrows. Content cross-fades via `contentMotion`. e2e waits for the
+  circle to settle before aiming at it. The fake helper moves any fixture event happening now/soon an hour out,
+  so pill tests don't depend on the time of day.
