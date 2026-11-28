@@ -226,6 +226,13 @@ full answers a click away. If one AI fails, the others are still compared.
 comparison) is pasted after your request. Only your own words decide whether Watson asks before
 sending; the passed-along answer doesn't.
 
+**When an AI asks you something** (Claude: "which kind do you want?"), its options show up as buttons.
+Tap one or several, add a note if you like, and **Send** puts your answer into the same chat in that
+app. You can also just say or type "the second one": Watson remembers what the AI asked.
+
+**The apps don't need to be open.** Watson opens a closed app first and waits for it to start. Leave it
+running while it answers; it can stay in the background.
+
 Every hand-off starts with something you asked for. Watson never loops on its own.
 
 ## Tests

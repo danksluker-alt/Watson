@@ -110,6 +110,16 @@ export type DelegationData = {
   endedAt?: number
 }
 
+/** A question one of your AIs asked, with options to tap; the pick goes back to that AI. */
+export type ChoicesData = {
+  question?: string
+  options: { title: string; detail?: string }[]
+  /** More than one may be picked. */
+  multiple?: boolean
+  agentId?: string
+  agent?: string
+}
+
 /** Several AIs asked the same thing, side by side, with Watson's read on where they agree. */
 export type CompareData = {
   groupId: string
@@ -138,6 +148,7 @@ export type Block =
   | { type: 'nowPlaying'; data: NowPlayingData }
   | { type: 'delegation'; data: DelegationData }
   | { type: 'compare'; data: CompareData }
+  | { type: 'choices'; data: ChoicesData }
   | { type: 'calendar'; data: CalendarData }
   | { type: 'reminders'; data: RemindersData }
   | { type: 'notes'; data: NotesData }
@@ -221,6 +232,8 @@ export type UIState = {
   glance: Glance
   /** The user is holding/moving the pill. */
   arranging: boolean
+  /** The dashboard is in front: the panel folds back into the pill so they don't overlap. */
+  tucked: boolean
 }
 
 // ---------- Settings ----------
@@ -297,6 +310,8 @@ export type WatsonAPI = {
   talkLive: (draft?: string) => void
   /** The pill's right-click menu. */
   pillMenu: () => void
+  /** Answer a question an AI asked: sent to that AI in the same conversation. */
+  replyToAgent: (agentId: string, text: string) => void
   ask: (text: string) => void
   cancel: () => void
   dismiss: () => void

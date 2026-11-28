@@ -29,6 +29,7 @@ export class Store extends EventEmitter {
     pillShape: 'pill',
     glance: {},
     arranging: false,
+    tucked: false,
   }
 
   set(patch: Partial<UIState>) {

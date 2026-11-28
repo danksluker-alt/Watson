@@ -210,7 +210,7 @@ export function SettingsPage() {
         <Row label="Talk shortcut" hint="e.g. Alt+Space, Command+Shift+Space">
           <input className="text" defaultValue={s.hotkey} onBlur={(e) => e.target.value.trim() && save({ hotkey: e.target.value.trim() })} />
         </Row>
-        <Row label="When I click Watson or use the talk shortcut" hint={s.inputMode === 'review' ? 'Your words appear in a box; nothing is sent until you press Send' : 'Watson answers out loud as soon as you stop, and keeps listening for a moment'}>
+        <Row label="When I click Watson or use the talk shortcut" hint={s.inputMode === 'review' ? 'See and edit your words first' : 'Watson answers as soon as you stop'}>
           <div className="segmented light">
             <button className={s.inputMode === 'review' ? 'on' : ''} onClick={() => save({ inputMode: 'review' })}>
               Dictate, then send

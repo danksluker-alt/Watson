@@ -23,6 +23,8 @@ type Deps = {
   /** A finished comparison, for the history. */
   compared: (c: CompareData) => void
   announce: (spoken: string, panel: Panel | null) => void
+  /** An AI's answer came back: kept in the chat history and in Watson's short memory. */
+  answered: (a: { agent: string; prompt: string; reply: string; spoken: string; panel: Panel | null }) => void
 }
 
 export type StartOptions = {
@@ -143,7 +145,7 @@ export class Delegations {
     const { sentTo, before } = await this.oneAtATime(async () => {
       const settings = getSettings()
       this.update(jobId, { status: 'sending' })
-      const act = store.activity(agent.kind === 'web' ? `Opening ${agent.name} in your browser` : `Typing your request into ${agent.name}`)
+      const act = store.activity(agent.kind === 'web' ? `Opening ${agent.name} in your browser` : `Opening ${agent.name} and typing your request`)
       try {
         // What was on screen before, so the reply can be told apart from old text.
         let readFrom = agent.bundleId ?? ''
@@ -165,7 +167,7 @@ export class Delegations {
               submit: true,
               returnFocus: settings.returnFocusAfterHandoff,
             },
-            60_000,
+            90_000, // a closed app is launched first
           )
           sentTo = r.bundleId || readFrom
         } catch (e) {
@@ -201,8 +203,12 @@ export class Delegations {
       store.finishActivity(read, 'done')
       this.update(jobId, { status: 'done', summary: spoken })
       const job = this.job(jobId)
-      const blocks = [...(job ? [{ type: 'delegation' as const, data: job }] : []), ...(panel?.blocks ?? [])]
-      this.deps.announce(`${agent.name} answered. ${spoken}`, { title: panel?.title ?? `From ${agent.name}`, subtitle: panel?.subtitle, blocks })
+      // Options to tap go back to this agent, in the same conversation.
+      const extra = (panel?.blocks ?? []).map((b) => (b.type === 'choices' ? { ...b, data: { ...b.data, agentId: agent.id, agent: agent.name } } : b))
+      const blocks = [...(job ? [{ type: 'delegation' as const, data: job }] : []), ...extra]
+      const shown: Panel = { title: panel?.title ?? `From ${agent.name}`, subtitle: panel?.subtitle, blocks }
+      this.deps.answered({ agent: agent.name, prompt, reply, spoken, panel: shown })
+      this.deps.announce(`${agent.name} answered. ${spoken}`, shown)
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)
       this.update(jobId, { status: 'failed', error: message })
@@ -254,6 +260,8 @@ export class Delegations {
         takeaways,
       }
       this.deps.compared(data)
+      const panel: Panel = { title: `${joinNames(answered.map((r) => r.agent))} compared`, subtitle: shownPrompt, blocks: [{ type: 'compare', data }] }
+      this.deps.answered({ agent: joinNames(answered.map((r) => r.agent)), prompt: shownPrompt, reply: answered.map((r) => `${r.agent}: ${r.reply.slice(0, 700)}`).join('\n\n'), spoken, panel })
       this.deps.announce(`${spoken}${missing}`, { title: `${joinNames(answered.map((r) => r.agent))} compared`, subtitle: shownPrompt, blocks: [{ type: 'compare', data }] })
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e)

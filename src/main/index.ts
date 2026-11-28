@@ -232,6 +232,12 @@ function openSettings() {
 
 /** The Watson window: recent requests as a chat, every hand-off, and anything waiting for an OK. */
 function openWindow(opts: { quiet?: boolean } = {}) {
+  if (!opts.quiet) {
+    store.set({ tucked: true })
+    // Going to the dashboard ends a live conversation: no follow-up listening afterwards.
+    liveTalk = false
+    if (store.state.phase === 'listening' && !store.state.transcript) stopListening(true)
+  }
   if (homeWin && !homeWin.isDestroyed()) {
     if (opts.quiet) homeWin.showInactive()
     else {
@@ -258,8 +264,12 @@ function openWindow(opts: { quiet?: boolean } = {}) {
       app.focus({ steal: true })
     }
   })
+  // While the dashboard is in front, the panel folds back into the pill (the dashboard shows the same things).
+  homeWin.on('focus', () => store.set({ tucked: true }))
+  homeWin.on('blur', () => store.set({ tucked: false }))
   homeWin.on('closed', () => {
     homeWin = null
+    store.set({ tucked: false })
   })
 }
 
@@ -753,6 +763,7 @@ function onHotkey(mode: InputMode) {
   if (store.state.ringing) return stopRinging()
   const sinceLast = Date.now() - lastHotkeyAt
   lastHotkeyAt = Date.now()
+  store.set({ tucked: false }) // you called Watson: show it, even over the dashboard
   console.log(`[watson] hotkey (${mode}) while ${store.state.phase}`)
   if (liveOverlay() && store.state.phase === 'idle') placeOverlay()
   switch (store.state.phase) {
@@ -928,6 +939,10 @@ const delegations = new Delegations({
   summarize: (agent, prompt, reply) => brain.summarize(agent, prompt, reply),
   compare: (prompt, answers) => brain.compare(prompt, answers),
   compared: (c) => history.addCompare(c),
+  answered: ({ agent, prompt, reply, spoken, panel }) => {
+    brain.noteHandoff(agent, prompt, reply, spoken)
+    history.addTurn({ mode: 'voice', you: '', watson: `${agent} answered. ${spoken}`, title: panel?.title, blocks: panel?.blocks })
+  },
   announce,
 })
 
@@ -1024,6 +1039,20 @@ function registerIpc() {
     liveTalk = true
     if (text) return void handleUtterance(text, 'voice')
     startListening('fresh')
+  })
+  ipcMain.on('agent:reply', async (_e, agentId: string, text: string) => {
+    const t = String(text ?? '').trim().slice(0, 4000)
+    if (!t) return
+    try {
+      // Same conversation in that app: it's an answer to its question.
+      const { job } = await delegations.start(String(agentId), t, false, { newChat: false })
+      history.addTurn({ mode: 'text', you: t, watson: `Sent to ${job.agent}.`, blocks: [{ type: 'delegation', data: job }] })
+      brain.noteHandoff(job.agent, t, '(waiting for the answer)', `I sent your answer to ${job.agent}.`)
+      store.set({ panel: { title: `Your answer to ${job.agent}`, blocks: [{ type: 'delegation', data: job }] }, expanded: true })
+      armCollapse()
+    } catch (e) {
+      store.set({ error: e instanceof Error ? e.message : String(e), expanded: true })
+    }
   })
   ipcMain.on('pill:menu', () => {
     const s = getSettings()

@@ -4,6 +4,7 @@ import { Pin } from '../components/Icons'
 import { BatteryWidget, CalendarWidget, ClockWidget, NotesWidget, RemindersWidget } from './Apple'
 import { BarChart, LineChart } from '../components/Charts'
 import { Markdown } from '../components/Markdown'
+import { ChoicesCard } from './Choices'
 import { CompareCard } from './Compare'
 import { DelegationCard } from './Delegation'
 import { NowPlayingWidget } from './NowPlaying'
@@ -104,6 +105,8 @@ export function BlockView({ block }: { block: Block }) {
       return <DelegationCard data={block.data} />
     case 'compare':
       return <CompareCard data={block.data} />
+    case 'choices':
+      return <ChoicesCard data={block.data} />
     case 'calendar':
       return <CalendarWidget data={block.data} />
     case 'reminders':

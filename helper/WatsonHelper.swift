@@ -939,14 +939,17 @@ enum AX {
             usleep(200_000)
         } else if let bundleId, !bundleId.isEmpty {
             target = bundleId
+            // A closed app is launched; it needs longer to show its window and message box.
+            let wasRunning = !NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).isEmpty
+            if !wasRunning { log("Opening \(bundleId); it wasn't running.") }
             run("/usr/bin/open", ["-b", bundleId])
-            try waitFront(bundleId, seconds: 12)
-            usleep(700_000)
-            _ = waitForInput(bundleId, seconds: 3) // wakes up the app's accessibility tree
+            try waitFront(bundleId, seconds: wasRunning ? 12 : 30)
+            usleep(wasRunning ? 700_000 : 2_500_000)
+            _ = waitForInput(bundleId, seconds: wasRunning ? 3 : 15) // wakes up the app's accessibility tree
             if newChat, let pair = appElement(bundleId), startNewChat(pair.1, chatMenu: chatMenu) {
                 usleep(900_000)
             }
-            guard let input = waitForInput(bundleId, seconds: 6) else {
+            guard let input = waitForInput(bundleId, seconds: wasRunning ? 6 : 15) else {
                 throw NSError(domain: "watson", code: 15, userInfo: [NSLocalizedDescriptionKey: "I couldn't find the app's message box, so nothing was sent."])
             }
             _ = focus(input)

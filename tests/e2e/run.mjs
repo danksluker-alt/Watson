@@ -250,6 +250,32 @@ await scenario('Hand-off to Claude app with code in the answer', async () => {
   return 'answer shown with the code and a spoken summary'
 })
 
+await scenario('An AI asks a question: tap options, they go back to it', async () => {
+  await talk('Ask Claude to create a new marketing agent for my apps')
+  await until(async () => (await spokenText()).includes('Claude answered'), 20_000)
+  await overlay.waitForSelector('.choices .choice', { timeout: 5000 })
+  await overlay.click('.choice:has-text("Claude Code subagent")')
+  await overlay.click('.choice:has-text("Scheduled marketing task")')
+  await shot('31-choices')
+  await overlay.click('.choices-send .btn.primary')
+  const sent = await until(async () => (await helper('/state')).sent[1], 10_000)
+  assert(sent.text === 'I choose these: 2. Claude Code subagent; 4. Scheduled marketing task.', `sent "${sent.text}"`)
+  assert(sent.newChat === false, 'the answer should go to the same conversation')
+  await until(async () => (await spokenText()).match(/Claude answered/g)?.length === 2, 20_000)
+  return 'two options tapped and sent to the same Claude chat; its next answer came back'
+})
+
+await scenario('Dashboard in front: the panel folds into the pill', async () => {
+  await talk('Compare the three plans')
+  await overlay.waitForSelector('table', { timeout: 10_000 })
+  await overlay.evaluate(() => window.watson.openWindow())
+  await until(async () => (await overlay.evaluate(() => document.querySelector('.island')?.getAttribute('data-mode'))) === 'pill', 5000)
+  const win = await until(async () => app.windows().find((w) => w.url().includes('#home')), 10_000)
+  await win.close()
+  await until(async () => !(await overlay.evaluate(() => window.watson.getState())).tucked, 5000)
+  return 'opening the dashboard folded the panel away; closing it brought Watson back'
+})
+
 await scenario('Sensitive request waits for “send”', async () => {
   await talk('Ask Claude to email Sarah that the launch moved to Friday')
   await overlay.waitForSelector('.confirm', { timeout: 10_000 })

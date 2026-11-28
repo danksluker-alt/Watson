@@ -90,6 +90,7 @@ const MusicInput = z.object({
 })
 const OpenInput = z.object({ kind: z.enum(['app', 'url', 'file']), target: z.string().min(1) })
 const DelegateInput = z.object({ agent: z.string(), request: z.string().min(1), sensitive: z.boolean(), new_chat: z.boolean().optional(), include_previous_answer: z.boolean().optional() })
+const ChoicesInput = z.object({ question: z.string().optional(), options: z.array(z.object({ title: z.string().min(1), detail: z.string().optional() })).min(2), multiple: z.boolean().optional() })
 const AskSeveralInput = z.object({ agents: z.array(z.string()).min(1), request: z.string().min(1), sensitive: z.boolean(), include_previous_answer: z.boolean().optional() })
 const CalendarInput = z.object({ range: z.string().optional() })
 const AddEventInput = z.object({ title: z.string().min(1), start: z.string(), end: z.string().optional(), all_day: z.boolean().optional(), location: z.string().optional() })
@@ -368,6 +369,7 @@ function systemPrompt(settings: Settings, spoken: boolean): string {
     'When the user wants something kept on screen ("pin", "keep it up", "put it on my other screen"), use pin_widget.',
     'Calendar events and reminders you add take effect right away: repeat back what you added.',
     'Use delegate for coding, website changes, email, calendar, documents and anything needing the user\'s connectors. Then say in a few words that you handed it off.',
+    'When the user answers something one of their AIs asked (a number, an option, yes or no, a pick), pass it to that same agent with delegate and new_chat false, spelling out the chosen option(s) in words.',
     'When the user names two or more AIs, says "compare", "ask everyone" or wants a second opinion, use ask_several once (not delegate twice). When they refer to an earlier AI answer ("send that to Claude"), set include_previous_answer.',
     'Never claim you did something you did not do. If you are unsure, say so.',
     'Answer only the newest request and call only the tools it needs. Your earlier replies in this conversation were based on real tool results (only their text is kept to save space): trust them, and never re-check, retract or "correct" them unless the user says something is wrong.',
@@ -832,6 +834,19 @@ export class Brain {
     }
   }
 
+  /**
+   * Remember an AI's answer in the conversation, so "2" or "the second one" afterwards makes
+   * sense. Only a clipped copy is kept, to keep later calls cheap.
+   */
+  noteHandoff(agent: string, prompt: string, reply: string, spoken: string) {
+    const clipped = reply.length > 1500 ? `${reply.slice(0, 1500)}…` : reply
+    this.history.push(
+      { role: 'user', content: `(Earlier you handed this to ${agent}: "${prompt.slice(0, 300)}". ${agent} answered:\n${clipped})` },
+      { role: 'assistant', content: spoken || `${agent} answered.` },
+    )
+    this.history = this.history.slice(-12)
+  }
+
   /** Compare several agents' answers: where they agree, how they differ, and one line each. */
   async compare(prompt: string, answers: { agent: string; reply: string }[]): Promise<{ spoken: string; takeaways: { agent: string; text: string }[] }> {
     const settings = getSettings()
@@ -867,10 +882,25 @@ export class Brain {
     const messages: Msg[] = [
       {
         role: 'user',
-        content: `The user asked ${agentName}:\n<request>${prompt}</request>\n\n${agentName} answered:\n<answer>${clipped}</answer>\n\nTell the user what ${agentName} said in 1 to 3 spoken sentences: the outcome first, then anything they need to do. If the answer has code, steps, a list, a draft or data, also call show_panel with a clean, readable version (code in a markdown text block).`,
+        content: `The user asked ${agentName}:\n<request>${prompt}</request>\n\n${agentName} answered:\n<answer>${clipped}</answer>\n\nTell the user what ${agentName} said in 1 to 3 spoken sentences: the outcome first, then anything they need to do. If ${agentName} asks the user to choose between options or answer a question, call offer_choices with those options (short titles, one-line details) and in speech just say what it's asking and that they can tap an option or say it; don't read every option. Otherwise, if the answer has code, steps, a list, a draft or data, call show_panel with a clean, readable version (code in a markdown text block).`,
       },
     ]
-    const tools = toolDefs(settings).filter((t) => toolName(t) === 'show_panel')
+    const tools: Anthropic.Beta.BetaToolUnion[] = [
+      ...toolDefs(settings).filter((t) => toolName(t) === 'show_panel'),
+      {
+        name: 'offer_choices',
+        description: 'When the answer asks the user to pick: show the options as buttons. The pick is sent back to the same AI.',
+        input_schema: {
+          type: 'object',
+          properties: {
+            question: { type: 'string', description: 'What is being asked, in a few words' },
+            options: { type: 'array', items: { type: 'object', properties: { title: { type: 'string' }, detail: { type: 'string' } }, required: ['title'] } },
+            multiple: { type: 'boolean', description: 'true if more than one may be picked' },
+          },
+          required: ['options'],
+        },
+      },
+    ]
     let spoken = ''
     for (let round = 0; round < 3; round++) {
       const message = await client.beta.messages.create({
@@ -891,6 +921,13 @@ export class Brain {
       messages.push({
         role: 'user',
         content: calls.map((call): Anthropic.Beta.BetaToolResultBlockParam => {
+          if (call.name === 'offer_choices') {
+            const c = ChoicesInput.safeParse(call.input)
+            if (!c.success) return { type: 'tool_result', tool_use_id: call.id, is_error: true, content: c.error.message }
+            blocks.push({ type: 'choices', data: { question: c.data.question, options: c.data.options.slice(0, 8), multiple: c.data.multiple } })
+            if (!meta.title) meta = { title: c.data.question ? `${agentName} asks` : `From ${agentName}`, subtitle: c.data.question }
+            return { type: 'tool_result', tool_use_id: call.id, content: 'Shown.' }
+          }
           const p = ShowPanelInput.safeParse(call.input)
           if (!p.success) return { type: 'tool_result', tool_use_id: call.id, is_error: true, content: p.error.message }
           blocks.push(...(p.data.blocks as Block[]))

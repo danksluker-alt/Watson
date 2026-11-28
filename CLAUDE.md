@@ -87,3 +87,10 @@
   listen replaces it. If on-device recognition is missing, the setting turns itself off with a notice.
 - Right-click on the pill: native menu (`pill:menu`). Dashboard tabs: Conversation, AI agents, Widgets
   (`recentWidgets` in Home.tsx: newest block per place/symbol/type from history turns).
+- Questions from an AI: `brain.summarize` has an extra `offer_choices` tool → `choices` block
+  (`ChoicesCard`); `runOne` stamps it with the agent, and `agent:reply` sends the pick with
+  `newChat: false`. Every finished hand-off calls `deps.answered`: `brain.noteHandoff` (clipped answer in
+  the short conversation memory, so "2" makes sense) and a history turn with `you: ''`.
+- `tucked`: true while the dashboard window has focus (and on `openWindow`); the overlay stays a pill when
+  idle. Opening the dashboard ends live talk. The hotkey clears `tucked`.
+- `ax.send` gives an app that wasn't running more time to launch (30 s to come forward, 15 s for its box).

@@ -119,6 +119,14 @@ export function HomePage() {
     setTab('chat')
   }
 
+  // Hand-off cards saved with a turn show the job as it is now, not as it was when asked.
+  const live = (blocks: Block[]): Block[] =>
+    blocks.map((b) => {
+      if (b.type !== 'delegation') return b
+      const now = (s?.jobs ?? []).find((j) => j.jobId === b.data.jobId) ?? h.jobs.find((j) => j.jobId === b.data.jobId)
+      return now ? { type: 'delegation', data: now } : b
+    })
+
   // Group the chat by day.
   const groups: { day: string; turns: HistoryTurn[] }[] = []
   for (const t of turns) {
@@ -193,13 +201,15 @@ export function HomePage() {
                 <div className="day">{g.day}</div>
                 {g.turns.map((t) => (
                   <div key={t.id} className="turn">
-                    <div className="bubble you">
-                      {t.you}
-                      <span className="stamp">
-                        {time(t.at)}
-                        {t.mode === 'voice' ? ' · spoken' : ''}
-                      </span>
-                    </div>
+                    {t.you && (
+                      <div className="bubble you">
+                        {t.you}
+                        <span className="stamp">
+                          {time(t.at)}
+                          {t.mode === 'voice' ? ' · spoken' : ''}
+                        </span>
+                      </div>
+                    )}
                     {t.watson && (
                       <div className={t.watson.startsWith('⚠︎') ? 'bubble watson err' : 'bubble watson'}>
                         <Markdown text={t.watson} />
@@ -208,7 +218,7 @@ export function HomePage() {
                     {t.blocks && t.blocks.length > 0 && (
                       <div className="turn-blocks">
                         {t.title && <div className="turn-title">{t.title}</div>}
-                        <Blocks blocks={t.blocks} />
+                        <Blocks blocks={live(t.blocks)} />
                       </div>
                     )}
                   </div>

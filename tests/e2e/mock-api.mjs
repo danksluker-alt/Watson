@@ -42,6 +42,17 @@ export function startMockApi(port) {
         }),
       }
     }
+    if (t.includes('<answer>') && t.includes('which kind do you want')) {
+      return {
+        text: 'Claude needs one choice first: which kind of marketing agent you want. Tap an option or say it.',
+        tools: [{ name: 'offer_choices', input: { question: 'Which kind of marketing agent?', multiple: true, options: [
+          { title: 'Reusable marketing skill', detail: 'Campaign plans on demand' },
+          { title: 'Claude Code subagent', detail: 'For a coding project' },
+          { title: 'Voice agent', detail: 'Talks to customers' },
+          { title: 'Scheduled marketing task', detail: 'Runs weekly on its own' },
+        ] } }],
+      }
+    }
     if (t.includes('<answer>')) {
       const code = t.includes('```')
       return {

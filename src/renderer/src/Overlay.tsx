@@ -184,6 +184,8 @@ const isReviewing = (s: UIState) => Boolean(s.draft) || (s.capture === 'review' 
 /** pill (resting or live status), compact (listening/thinking/speaking) or the full panel. */
 function modeOf(s: UIState, typing: boolean): Mode {
   if (s.arranging) return 'pill'
+  // The dashboard is in front and shows the same things: stay a pill instead of covering it.
+  if (s.tucked && s.phase === 'idle' && !typing && !isReviewing(s) && !s.ringing) return 'pill'
   const hasPanel = isReviewing(s) || Boolean(s.panel || s.confirm || s.error || s.notice || s.ringing || typing || (s.expanded && s.reply))
   return hasPanel ? 'panel' : s.phase !== 'idle' ? 'compact' : 'pill'
 }
@@ -325,7 +327,7 @@ export function Overlay() {
                 <div className="compact-text">
                   {s.phase === 'listening' && (
                     <div className={s.transcript ? 'transcript' : 'transcript placeholder'}>
-                      {s.transcript || (s.capture === 'review' ? 'Speak — nothing is sent until you press Send' : 'Listening… (live conversation)')}
+                      {s.transcript || 'Listening…'}
                     </div>
                   )}
                   {s.phase === 'thinking' && (
@@ -379,7 +381,6 @@ export function Overlay() {
                     <div className={s.phase === 'thinking' ? 'panel-title shimmer' : 'panel-title'}>
                       {reviewing ? (s.phase === 'listening' ? 'Listening…' : 'Review and send') : statusText(s)}
                     </div>
-                    {reviewing && <div className="panel-sub">Edit your words, choose where they go, press Return.</div>}
                     {!reviewing && s.panel?.subtitle && s.phase === 'idle' && <div className="panel-sub">{s.panel.subtitle}</div>}
                   </div>
                   <div className="panel-actions">
@@ -512,7 +513,7 @@ export function Overlay() {
                 )}
 
                 <footer className="panel-foot">
-                  <span>{reviewing ? 'Return to send · Shift-Return for a new line · Esc to discard' : '⌥ Space to talk · ⌥⇧ Space to dictate · Esc to close'}</span>
+                  <span>{reviewing ? 'Return to send · Esc to discard' : 'Esc to close'}</span>
                   <span>${s.usageTodayUsd.toFixed(3)} today</span>
                 </footer>
               </motion.div>

@@ -48,12 +48,21 @@ const REPLIES = {
     '```',
     'I opened pull request #142 for you to review.',
   ],
+  agentq: [
+    'Happy to build it. Which kind do you want?',
+    '1. A reusable marketing skill for campaign plans',
+    '2. A Claude Code subagent for a coding project',
+    '3. A voice agent that talks to customers',
+    '4. A scheduled weekly marketing task',
+    'Pick one or several.',
+  ],
+  chose: ['Great, I will set up the subagent and the weekly task now.'],
   email: ['Here is the draft to Sarah:', 'Subject: Launch moved to Friday', 'Hi Sarah, quick update: the launch is now on Friday, December 4. Thanks!', 'I saved it as a draft in Gmail. Say the word and I will send it.'],
 }
 
 function simulateAnswer(target, text, url) {
   const app = (apps[target] ??= { windows: [] })
-  const agent = url?.includes('grok') ? 'grok' : /email|sarah/i.test(text) ? 'email' : 'claude'
+  const agent = url?.includes('grok') ? 'grok' : /marketing agent/i.test(text) ? 'agentq' : /^I choose/.test(text) ? 'chose' : /email|sarah/i.test(text) ? 'email' : 'claude'
   let win
   if (url) {
     win = { title: new URL(url).hostname, lines: [new URL(url).hostname.replace(/\..*/, '').toUpperCase(), 'New chat'], busy: false }
