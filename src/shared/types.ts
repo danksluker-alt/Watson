@@ -219,10 +219,14 @@ export type UIState = {
   /** How the current listening session ends: answer right away, or fill the draft. */
   capture: InputMode
   draft: Draft | null
+  /** The unsent draft is put away in the pill (clicked away or Esc); a click brings it back. */
+  draftParked: boolean
   insertTarget: string | null
   insertTargetName: string | null
   agents: { id: string; name: string }[]
   sounds: boolean
+  /** Watson's voice is muted: answers are shown, not spoken. */
+  muted: boolean
   /** Running timers and alarms, soonest first (the pill shows the next one). */
   timers: TimerItem[]
   /** A timer or alarm that just went off and hasn't been dismissed. */
@@ -258,6 +262,8 @@ export type Settings = {
   wakeWord: boolean
   /** Which kind of voice "Best available" prefers. */
   voiceGender: 'male' | 'female' | 'any'
+  /** Watson's own voice is off (the Mac's sound isn't touched). */
+  muted: boolean
   sounds: boolean
   musicApp: MusicApp
   browserBundleId: string
@@ -324,6 +330,13 @@ export type WatsonAPI = {
   music: (app: MusicApp, action: 'playpause' | 'next' | 'previous') => void
   setCapture: (mode: InputMode) => void
   dictate: (currentText: string) => void
+  /** Stop listening and keep the words so far, to finish by typing. */
+  takeOver: (currentText: string) => void
+  /** Keeps the draft's edited text in the main process (and on disk) as you type. */
+  draftText: (text: string) => void
+  /** Brings a put-away draft back. */
+  openDraft: () => void
+  setMuted: (muted: boolean) => void
   submitDraft: (text: string, target: string) => void
   cancelDraft: () => void
   pin: (block: Block) => void
@@ -342,7 +355,7 @@ export type WatsonAPI = {
   permissions: () => Promise<PermissionStatus | null>
   requestPermissions: () => Promise<PermissionStatus | null>
   openPrivacyPane: (pane: 'Microphone' | 'SpeechRecognition' | 'Accessibility' | 'Automation' | 'Calendars' | 'Reminders') => void
-  testVoice: () => void
+  testVoice: (voiceId?: string, gender?: string) => void
   installedApps: () => Promise<{ name: string; bundleId: string }[]>
   openWindow: () => void
   getHistory: () => Promise<HistoryData>

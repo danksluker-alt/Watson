@@ -573,11 +573,13 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         let regional = candidates.filter { $0.language == locale.replacingOccurrences(of: "_", with: "-") }
         let pool = regional.isEmpty ? candidates : regional
         let best = { (vs: [AVSpeechSynthesisVoice]) in vs.max { Voice.naturalness($0) < Voice.naturalness($1) } }
-        // The preferred gender wins if it has a natural-sounding voice; otherwise the most natural voice.
+        // A chosen gender is respected: its most natural voice, in this region if it has one, else any accent.
         let wanted: AVSpeechSynthesisVoiceGender? = gender == "male" ? .male : gender == "female" ? .female : nil
         if let wanted {
-            let match = pool.filter { $0.gender == wanted } + (regional.isEmpty ? [] : candidates.filter { $0.gender == wanted && !regional.contains($0) })
-            if let v = best(match), Voice.naturalness(v) >= 6 { return v }
+            let here = pool.filter { $0.gender == wanted }
+            let anywhere = candidates.filter { $0.gender == wanted }
+            if let v = best(here), let w = best(anywhere) { return Voice.naturalness(w) > Voice.naturalness(v) ? w : v }
+            if let v = best(here) ?? best(anywhere) { return v }
         }
         return best(pool)
     }

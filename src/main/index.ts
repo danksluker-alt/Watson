@@ -16,6 +16,7 @@ import { history } from './history'
 import { getStock } from './tools/stocks'
 import { getCalendar } from './tools/calendar'
 import { spentToday } from './usage'
+import { draftExpired, readSavedDraft, writeSavedDraft } from './savedDraft'
 import { timerName, timers as timerStore } from './timers'
 import type { TimerItem } from '@shared/types'
 import { paramsOf } from './widgets'
@@ -193,6 +194,12 @@ function createOverlay() {
   overlay.setAlwaysOnTop(true, 'screen-saver')
   overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
   overlay.setIgnoreMouseEvents(true, { forward: true })
+  // Clicking away (to read a message, say) puts an unsent draft away in the pill instead of losing it.
+  overlay.on('blur', () =>
+    setTimeout(() => {
+      if (overlay && !overlay.isDestroyed() && !overlay.isFocused() && !hovered) parkDraft()
+    }, 800),
+  )
   overlay.once('ready-to-show', () => {
     store.set({ layout: overlayPlacement().layout, pillShape: getSettings().pillShape })
     overlay?.showInactive()
@@ -303,6 +310,7 @@ function buildTrayMenu() {
       { label: `Dictate, then send    ${keyLabel(s.inputMode === 'review' ? s.hotkey : s.reviewHotkey)}`, click: () => onHotkey('review') },
       { label: `Talk live    ${keyLabel(s.inputMode === 'live' ? s.hotkey : s.reviewHotkey)}`, click: () => onHotkey('live') },
       { label: 'Listen for “Hey Watson”', type: 'checkbox', checked: s.wakeWord, click: () => setSettings({ wakeWord: !getSettings().wakeWord }) },
+      { label: 'Mute Watson', type: 'checkbox', checked: s.muted, click: () => setMuted(!getSettings().muted) },
       { type: 'separator' },
       {
         label: 'When I click Watson or press ' + keyLabel(s.hotkey),
@@ -341,11 +349,58 @@ function pushState(s: UIState) {
 }
 store.on('change', pushState)
 
+/** A draft that's open on screen (not put away in the pill). */
+const activeDraft = () => (store.state.draft && !store.state.draftParked ? store.state.draft : null)
+
+// The unsent draft is saved as it changes, so it survives clicking away, quitting and restarts.
+const draftFile = () => path.join(app.getPath('userData'), 'draft.json')
+let savedDraftText = ''
+let draftEditedAt = 0
+store.on('change', (s: UIState) => {
+  const text = s.draft?.text ?? ''
+  if (text === savedDraftText) return
+  savedDraftText = text
+  draftEditedAt = Date.now()
+  writeSavedDraft(draftFile(), text)
+})
+
+function restoreDraft() {
+  const d = readSavedDraft(draftFile())
+  if (!d) return
+  savedDraftText = d.text
+  draftEditedAt = d.at
+  store.set({ draft: { id: ++draftSeq, text: d.text }, draftParked: true, capture: 'review' })
+  console.log('[watson] restored an unsent draft')
+}
+
+/** Put the draft away in the pill; it comes back with a click. */
+function parkDraft() {
+  if (!store.state.draft || store.state.draftParked || listening || store.state.phase !== 'idle') return
+  if (!store.state.draft.text.trim()) {
+    store.set({ draft: null, capture: getSettings().inputMode, expanded: false })
+    return syncWake()
+  }
+  store.set({ draftParked: true, expanded: false, error: null })
+  syncWake()
+}
+
+function openDraft() {
+  if (!store.state.draft) return
+  // Too old to still matter: let it go instead of reopening it.
+  if (draftExpired(store.state.draft.text, draftEditedAt)) {
+    store.set({ draft: null, draftParked: false, capture: getSettings().inputMode })
+    return
+  }
+  store.set({ draftParked: false, expanded: true, tucked: false, capture: 'review' })
+  liveOverlay()?.focus()
+}
+
 function syncFromSettings(s: Settings) {
   store.set({
     agents: s.agents.filter((a) => a.enabled).map((a) => ({ id: a.id, name: a.name })),
     sounds: s.sounds,
-    capture: store.state.phase === 'idle' && !store.state.draft ? s.inputMode : store.state.capture,
+    muted: s.muted,
+    capture: store.state.phase === 'idle' && !activeDraft() ? s.inputMode : store.state.capture,
   })
 }
 
@@ -407,6 +462,11 @@ function clearTimer(name: keyof typeof timers) {
 }
 
 function say(sentence: string) {
+  // Muted: the answer stays on screen instead of being read out.
+  if (getSettings().muted) {
+    if (!store.state.expanded) store.set({ expanded: true })
+    return
+  }
   helper.send('speak', { speakId: `s${++speakSeq}`, text: sentence })
   speakingActive = true
 }
@@ -415,6 +475,33 @@ function speakText(text: string) {
   const speaker = new Speaker(say)
   speaker.push(text)
   speaker.flush()
+  // Nothing was spoken (muted): carry on as if the speech had finished.
+  if (!speakingActive) setTimeout(afterSpeech, 0)
+}
+
+function setMuted(muted: boolean) {
+  setSettings({ muted })
+  console.log(`[watson] voice ${muted ? 'muted' : 'unmuted'}`)
+  if (muted && speakingActive) {
+    helper.send('speak.stop')
+    speakingActive = false
+    store.set({ expanded: true })
+    afterSpeech()
+  }
+}
+
+/** Stop listening and keep the words heard so far in the editor, to finish by typing. */
+function takeOver(current: string) {
+  clearTimer('noSpeech')
+  clearTimer('followUp')
+  if (listening) helper.send('listen.cancel')
+  listening = false
+  liveTalk = false
+  const heard = store.state.phase === 'listening' ? store.state.transcript.trim() : ''
+  const base = String(current ?? '').trim() || store.state.draft?.text.trim() || ''
+  const joined = [base, heard].filter(Boolean).join(' ')
+  store.set({ draft: { id: ++draftSeq, text: joined }, draftParked: false, tucked: false, phase: 'idle', transcript: '', capture: 'review', expanded: true, error: null })
+  liveOverlay()?.focus()
 }
 
 function startListening(kind: 'fresh' | 'watch') {
@@ -432,7 +519,7 @@ function startListening(kind: 'fresh' | 'watch') {
   })
   if (kind === 'fresh') {
     clearTimer('followUp')
-    store.set({ phase: 'listening', transcript: '', reply: store.state.draft ? store.state.reply : '', error: null, notice: null })
+    store.set({ phase: 'listening', transcript: '', reply: activeDraft() ? store.state.reply : '', error: null, notice: null })
     clearTimer('noSpeech')
     timers.noSpeech = setTimeout(() => {
       if (store.state.phase === 'listening' && !store.state.transcript) stopListening(true)
@@ -457,11 +544,11 @@ function stopListening(cancel: boolean) {
 function goIdle() {
   clearTimer('noSpeech')
   clearTimer('followUp')
-  store.set({ phase: 'idle', transcript: '', capture: store.state.draft ? 'review' : getSettings().inputMode })
+  store.set({ phase: 'idle', transcript: '', capture: activeDraft() ? 'review' : getSettings().inputMode })
   liveTalk = false
   armCollapse()
   // An agent's answer that arrived while Watson was busy is read out now.
-  const next = !store.state.draft && helper.ready ? announceQueue.shift() : undefined
+  const next = !activeDraft() && helper.ready ? announceQueue.shift() : undefined
   if (next) {
     inputMode = 'voice'
     store.set({ phase: 'thinking', reply: next.spoken, ...(next.panel ? { panel: next.panel, expanded: true } : {}) })
@@ -474,7 +561,7 @@ function goIdle() {
 /** "Hey Watson" listens only while Watson is idle; any real listening takes over the mic. */
 function syncWake() {
   const s = getSettings()
-  const want = s.wakeWord && helper.ready && store.state.phase === 'idle' && !listening && !speakingActive && !store.state.draft && !store.state.confirm
+  const want = s.wakeWord && helper.ready && store.state.phase === 'idle' && !listening && !speakingActive && !activeDraft() && !store.state.confirm
   if (want) helper.send('wake.start')
   else if (!s.wakeWord) helper.send('wake.stop')
 }
@@ -482,7 +569,7 @@ function syncWake() {
 function armCollapse() {
   clearTimer('collapse')
   timers.collapse = setTimeout(() => {
-    if (hovered || store.state.phase !== 'idle' || store.state.confirm || store.state.draft) return armCollapse()
+    if (hovered || store.state.phase !== 'idle' || store.state.confirm || activeDraft()) return armCollapse()
     store.set({ panel: null, reply: '', expanded: false, activity: [] })
   }, 90_000)
 }
@@ -514,7 +601,7 @@ function afterSpeech() {
 function appendDraft(text: string) {
   const prev = store.state.draft?.text.trim()
   const joined = prev ? `${prev} ${text.trim()}` : text.trim()
-  store.set({ draft: { id: ++draftSeq, text: joined }, phase: 'idle', transcript: '', capture: 'review', expanded: true })
+  store.set({ draft: { id: ++draftSeq, text: joined }, draftParked: false, phase: 'idle', transcript: '', capture: 'review', expanded: true })
   clearTimer('noSpeech')
   liveOverlay()?.focus() // so the text can be edited right away
 }
@@ -529,7 +616,7 @@ function onHelperEvent(e: HelperEvent) {
       break
     case 'wake':
       console.log('[watson] heard “Hey Watson”')
-      if (store.state.phase === 'idle' && !store.state.draft) onHotkey('live')
+      if (store.state.phase === 'idle' && !activeDraft()) onHotkey('live')
       break
     case 'level':
       liveOverlay()?.webContents.send('level', e.value)
@@ -539,7 +626,7 @@ function onHelperEvent(e: HelperEvent) {
       if (store.state.ringing) stopRinging()
       clearTimer('noSpeech')
       clearTimer('followUp')
-      if (store.state.phase !== 'listening') store.set({ phase: 'listening', reply: store.state.draft ? store.state.reply : '' })
+      if (store.state.phase !== 'listening') store.set({ phase: 'listening', reply: activeDraft() ? store.state.reply : '' })
       store.set({ transcript: e.text })
       break
     case 'final':
@@ -772,7 +859,9 @@ function onHotkey(mode: InputMode) {
     case 'idle':
       // Remember the app you were in, so dictation can be typed back into it.
       void rememberInsertTarget()
-      store.set({ capture: store.state.draft ? 'review' : mode })
+      // Dictating again brings a put-away draft back and adds to it; a live talk leaves it put away.
+      if (store.state.draftParked && mode === 'review') openDraft()
+      store.set({ capture: activeDraft() ? 'review' : mode })
       liveTalk = store.state.capture === 'live'
       return startListening('fresh')
     case 'listening':
@@ -816,16 +905,20 @@ function dismiss() {
     activity: [],
     error: null,
     notice: null,
-    draft: null,
     capture: getSettings().inputMode,
   })
+  // Esc never throws away your words: the draft goes into the pill (Discard deletes it).
+  if (store.state.draft) {
+    if (store.state.draft.text.trim()) store.set({ draftParked: true, capture: 'review' })
+    else store.set({ draft: null, draftParked: false })
+  }
   syncWake()
 }
 
 /** The user edited their dictated words and chose where they go. */
 async function submitDraft(text: string, target: string) {
   const t = text.trim()
-  store.set({ draft: null, capture: getSettings().inputMode })
+  store.set({ draft: null, draftParked: false, capture: getSettings().inputMode })
   if (!t) return goIdle()
   liveTalk = false
   if (target === 'watson') return handleUtterance(t, helper.ready ? 'voice' : 'text')
@@ -900,7 +993,7 @@ function announce(spoken: string, panel: Panel | null) {
     if (listening) helper.send('listen.cancel')
     listening = false
   }
-  if ((store.state.phase === 'idle' || quietFollowUp) && !store.state.draft) {
+  if ((store.state.phase === 'idle' || quietFollowUp) && !activeDraft()) {
     inputMode = 'voice'
     store.set({ phase: 'thinking', reply: spoken, ...(panel ? { panel, expanded: true } : {}) })
     speakText(spoken)
@@ -1019,7 +1112,16 @@ function registerIpc() {
   })
   // Only take keyboard focus when the user chooses to type, never on hover.
   ipcMain.on('ui:focus', () => liveOverlay()?.focus())
-  ipcMain.on('ui:toggleListen', () => onHotkey(store.state.draft ? 'review' : getSettings().inputMode))
+  ipcMain.on('ui:toggleListen', () => {
+    // A click on the pill with a put-away draft opens it.
+    if (store.state.draftParked && store.state.phase === 'idle') return openDraft()
+    onHotkey(activeDraft() ? 'review' : getSettings().inputMode)
+  })
+  ipcMain.on('ui:openDraft', () => openDraft())
+  ipcMain.on('ui:draftText', (_e, text: string) => {
+    const d = store.state.draft
+    if (d) store.set({ draft: { id: d.id, text: String(text ?? '').slice(0, 8000) } })
+  })
   ipcMain.on('ui:ask', (_e, text: string) => {
     if (listening) helper.send('listen.cancel')
     listening = false
@@ -1054,7 +1156,7 @@ function registerIpc() {
     const text = String(draft ?? '').trim().slice(0, 8000)
     if (listening) helper.send('listen.cancel')
     listening = false
-    store.set({ draft: null, error: null, capture: 'live' })
+    store.set({ draft: null, draftParked: false, error: null, capture: 'live' })
     liveTalk = true
     if (text) return void handleUtterance(text, 'voice')
     startListening('fresh')
@@ -1079,6 +1181,7 @@ function registerIpc() {
       { label: `Dictate, then send    ${keyLabel(s.inputMode === 'review' ? s.hotkey : s.reviewHotkey)}`, click: () => onHotkey('review') },
       { label: `Talk live    ${keyLabel(s.inputMode === 'live' ? s.hotkey : s.reviewHotkey)}`, click: () => onHotkey('live') },
       { type: 'separator' },
+      { label: 'Mute Watson', type: 'checkbox', checked: s.muted, click: () => setMuted(!getSettings().muted) },
       { label: 'Open dashboard', click: () => openWindow() },
       { label: 'Move or change shape…', click: () => store.set({ arranging: true }) },
       { label: 'Listen for “Hey Watson”', type: 'checkbox', checked: s.wakeWord, click: () => setSettings({ wakeWord: !getSettings().wakeWord }) },
@@ -1113,7 +1216,7 @@ function registerIpc() {
   ipcMain.on('ui:cancelDraft', () => {
     if (listening) helper.send('listen.cancel')
     listening = false
-    store.set({ draft: null, error: null })
+    store.set({ draft: null, draftParked: false, error: null })
     goIdle()
   })
   ipcMain.on('ui:pin', async (_e, block: Block) => {
@@ -1150,8 +1253,11 @@ function registerIpc() {
     }
   })
   ipcMain.on('ui:testVoice', () => {
-    if (helper.ready) speakText("Hi, I'm Watson. This is how I sound.")
+    // A preview plays even when Watson is muted.
+    if (helper.ready) helper.send('speak', { speakId: `s${++speakSeq}`, text: "Hi, I'm Watson. This is how I sound." })
   })
+  ipcMain.on('ui:setMuted', (_e, muted: boolean) => setMuted(Boolean(muted)))
+  ipcMain.on('ui:takeOver', (_e, text: string) => takeOver(String(text ?? '').slice(0, 8000)))
 
   // The overlay asks once on load, so it never misses the first state push.
   ipcMain.handle('ui:getState', () => ({ ...store.state, usageTodayUsd: spentToday() }))
@@ -1201,6 +1307,11 @@ app.whenReady().then(() => {
   )
   registerIpc()
   createOverlay()
+  restoreDraft()
+  // A short draft left in the pill for more than 12 hours is let go; 20 words or more are kept.
+  setInterval(() => {
+    if (store.state.draftParked && store.state.draft && draftExpired(store.state.draft.text, draftEditedAt)) store.set({ draft: null, draftParked: false, capture: getSettings().inputMode })
+  }, 10 * 60_000)
   createTray()
   registerHotkeys()
   syncFromSettings(getSettings())

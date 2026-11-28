@@ -4,7 +4,7 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { UIState } from '@shared/types'
-import { ArrowUp, Check, Close, Gear, InsertText, Keyboard, Mic, Pencil, Sparkle, Warning } from './components/Icons'
+import { Check, Close, Gear, InsertText, Keyboard, Mic, Pencil, Sparkle, Speaker, Warning } from './components/Icons'
 import { Markdown } from './components/Markdown'
 import { Bars, Orb } from './components/Orb'
 import { play } from './sounds'
@@ -14,7 +14,7 @@ import { RingingCard } from './widgets/Timers'
 import { pillWidth, useHoldToMove, useLive } from './pill'
 
 const SPRING = { type: 'spring' as const, stiffness: 420, damping: 34, mass: 0.9 }
-const WIDTH = { pill: 168, compact: 500, panel: 680 }
+const WIDTH = { pill: 168, compact: 500, dictate: 560, panel: 680 }
 type Mode = keyof typeof WIDTH
 
 function useMeasuredHeight() {
@@ -74,10 +74,16 @@ function useSounds(s: UIState | null) {
   }, [ringing])
 }
 
-// ---------------- Review editor ----------------
+// ---------------- Dictation ----------------
 
+/**
+ * While you talk: only your words. Click them to take over by typing (the mic stops).
+ * When you stop: the text is editable, with Send and Discard. Where it goes and the
+ * other ways of talking are one click further, under the destination button.
+ */
 function DraftEditor({ s }: { s: UIState }) {
   const [text, setText] = useState(s.draft?.text ?? '')
+  const [more, setMore] = useState(false)
   const [target, setTarget] = useState<string>(() => {
     try {
       return localStorage.getItem('watson.target') ?? 'watson'
@@ -92,6 +98,11 @@ function DraftEditor({ s }: { s: UIState }) {
   // New dictation arrives as a new draft id; local edits are kept otherwise.
   useEffect(() => {
     if (s.draft) setText(s.draft.text)
+  }, [draftId]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Focus the text whenever it becomes editable.
+  useEffect(() => {
+    if (listening) return
     window.watson.focus()
     const t = setTimeout(() => {
       const el = area.current
@@ -100,17 +111,25 @@ function DraftEditor({ s }: { s: UIState }) {
       el.setSelectionRange(el.value.length, el.value.length)
     }, 140)
     return () => clearTimeout(t)
-  }, [draftId]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [draftId, listening])
+
+  // Edits are kept by the main process (and on disk), so clicking away never loses them.
+  useEffect(() => {
+    if (listening) return
+    const t = setTimeout(() => window.watson.draftText(text), 300)
+    return () => clearTimeout(t)
+  }, [text, listening])
 
   useEffect(() => {
     const el = area.current
     if (!el) return
     el.style.height = '0px'
     el.style.height = `${Math.min(220, Math.max(52, el.scrollHeight))}px`
-  }, [text, s.transcript])
+  }, [text, listening])
 
   const choose = (t: string) => {
     setTarget(t)
+    setMore(false)
     try {
       localStorage.setItem('watson.target', t)
     } catch {
@@ -123,11 +142,26 @@ function DraftEditor({ s }: { s: UIState }) {
     if (!text.trim()) return
     window.watson.submitDraft(text, to)
   }
-  const label = to === 'watson' ? 'Send' : to === 'insert' ? `Type into ${appName(s)}` : `Send to ${s.agents.find((a) => a.id === to)?.name}`
+  const agent = s.agents.find((a) => a.id === to)
+  const label = to === 'watson' ? 'Send' : to === 'insert' ? 'Type it' : `Send to ${agent?.name}`
+
+  if (listening) {
+    return (
+      <div className="dictation" onMouseDown={(e) => { e.preventDefault(); window.watson.takeOver(text) }} title="Click to type">
+        <Orb phase="listening" size={26} />
+        <div className="dictation-text">
+          {text.trim() && <span className="prior">{text.trim()} </span>}
+          <span className={s.transcript ? '' : 'placeholder'}>{s.transcript || (text.trim() ? '' : 'Listening…')}</span>
+          <span className="caret" />
+        </div>
+        <Bars />
+      </div>
+    )
+  }
 
   return (
     <div className="draft">
-      <div className={listening ? 'draft-box live' : 'draft-box'}>
+      <div className="draft-box">
         <textarea
           ref={area}
           value={text}
@@ -138,34 +172,55 @@ function DraftEditor({ s }: { s: UIState }) {
               send()
             }
           }}
-          placeholder={listening ? '' : 'Your words appear here…'}
+          placeholder="Ask anything…"
           spellCheck
         />
-        {listening && <div className={s.transcript ? 'draft-live' : 'draft-live placeholder'}>{s.transcript || 'Listening…'}</div>}
       </div>
-      <div className="draft-targets">
-        <button className={to === 'watson' ? 'chip on' : 'chip'} onClick={() => choose('watson')} title="Watson answers, or hands it to Claude or Grok when that's better (or when you name one)">
-          <Sparkle size={12} /> Auto
-        </button>
-        {s.agents.map((a) => (
-          <button key={a.id} className={to === a.id ? 'chip on' : 'chip'} onClick={() => choose(a.id)}>
-            <AgentMark name={a.name} small /> {a.name}
-          </button>
-        ))}
-        <button className={to === 'insert' ? 'chip on' : 'chip'} onClick={() => choose('insert')} title="Type it where your cursor was">
-          <InsertText size={12} /> Type into {appName(s)}
-        </button>
-      </div>
+      <AnimatePresence initial={false}>
+        {more && (
+          <motion.div
+            key="more"
+            className="draft-more"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
+          >
+            <div className="more-row draft-targets">
+              <span className="more-label">Send to</span>
+              <button className={to === 'watson' ? 'chip on' : 'chip'} onClick={() => choose('watson')} title="Watson answers, or hands it to the AI that fits best">
+                <Sparkle size={12} /> Auto
+              </button>
+              {s.agents.map((a) => (
+                <button key={a.id} className={to === a.id ? 'chip on' : 'chip'} onClick={() => choose(a.id)}>
+                  <AgentMark name={a.name} small /> {a.name}
+                </button>
+              ))}
+              <button className={to === 'insert' ? 'chip on' : 'chip'} onClick={() => choose('insert')} title="Type it where your cursor was">
+                <InsertText size={12} /> Type into {appName(s)}
+              </button>
+            </div>
+            <div className="more-row">
+              <span className="more-label">Voice</span>
+              <button className="chip" onClick={() => window.watson.dictate(text)}>
+                <Mic size={12} /> Keep talking
+              </button>
+              <button className="chip" onClick={() => window.watson.talkLive(to === 'watson' ? text : '')} title="Watson answers out loud and keeps listening">
+                <span className="live-dot" /> Talk live
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <div className="draft-actions">
-        <button className={listening ? 'mic-btn live' : 'mic-btn'} onClick={() => window.watson.dictate(text)} aria-label={listening ? 'Stop dictating' : 'Keep talking'}>
-          <Mic size={15} />
-          <span>{listening ? 'Done' : 'Keep talking'}</span>
+        <button className={more ? 'route on' : 'route'} onClick={() => setMore(!more)} aria-expanded={more} aria-label="Where it goes and more">
+          {to === 'watson' ? <Sparkle size={12} /> : to === 'insert' ? <InsertText size={12} /> : <AgentMark name={agent?.name ?? ''} small />}
+          <span>{to === 'watson' ? 'Auto' : to === 'insert' ? `Type into ${appName(s)}` : agent?.name}</span>
+          <svg className={more ? 'route-chev open' : 'route-chev'} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M6 9l6 6 6-6" />
+          </svg>
         </button>
-        <button className="mic-btn" onClick={() => window.watson.talkLive(to === 'watson' ? text : '')} title="Start a live voice conversation: Watson answers out loud and keeps listening">
-          <span className="live-dot" />
-          <span>Talk live</span>
-        </button>
-        <span className="draft-count">{text.trim() ? `${text.trim().split(/\s+/).length} words` : ''}</span>
+        <span className="flex" />
         <button className="btn ghost" onClick={() => window.watson.cancelDraft()}>
           Discard
         </button>
@@ -179,23 +234,37 @@ function DraftEditor({ s }: { s: UIState }) {
 
 // ---------------- Island ----------------
 
-const isReviewing = (s: UIState) => Boolean(s.draft) || (s.capture === 'review' && s.phase === 'listening' && Boolean(s.transcript))
+const isReviewing = (s: UIState) => (Boolean(s.draft) && !s.draftParked) || (s.capture === 'review' && s.phase === 'listening' && Boolean(s.transcript))
 
-/** pill (resting or live status), compact (listening/thinking/speaking) or the full panel. */
-function modeOf(s: UIState, typing: boolean): Mode {
+/** pill (resting or live status), compact (listening/thinking/speaking), dictation, or the full panel. */
+function modeOf(s: UIState): Mode {
   if (s.arranging) return 'pill'
+  if (isReviewing(s) && !s.confirm && !s.ringing) return 'dictate'
   // The dashboard is in front and shows the same things: stay a pill instead of covering it.
-  if (s.tucked && s.phase === 'idle' && !typing && !isReviewing(s) && !s.ringing) return 'pill'
-  const hasPanel = isReviewing(s) || Boolean(s.panel || s.confirm || s.error || s.notice || s.ringing || typing || (s.expanded && s.reply))
+  if (s.tucked && s.phase === 'idle' && !s.ringing) return 'pill'
+  const hasPanel = Boolean(s.panel || s.confirm || s.error || s.notice || s.ringing || (s.expanded && s.reply))
   return hasPanel ? 'panel' : s.phase !== 'idle' ? 'compact' : 'pill'
+}
+
+function MuteButton({ s }: { s: UIState }) {
+  return (
+    <button
+      className={s.muted ? 'icon-btn muted' : 'icon-btn'}
+      onClick={(e) => {
+        e.stopPropagation()
+        window.watson.setMuted(!s.muted)
+      }}
+      aria-label={s.muted ? 'Unmute Watson' : 'Mute Watson'}
+      title={s.muted ? 'Unmute Watson' : 'Mute Watson'}
+    >
+      <Speaker size={16} off={s.muted} />
+    </button>
+  )
 }
 
 export function Overlay() {
   const [s, setS] = useState<UIState | null>(null)
-  const [typing, setTyping] = useState(false)
-  const [draft, setDraft] = useState('')
   const [hover, setHover] = useState(false)
-  const inputRef = useRef<HTMLInputElement>(null)
   const [contentRef, contentH] = useMeasuredHeight()
 
   useEffect(() => {
@@ -209,7 +278,6 @@ export function Overlay() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setTyping(false)
         window.watson.setArranging(false)
         window.watson.dismiss()
       }
@@ -217,19 +285,12 @@ export function Overlay() {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [])
-  useEffect(() => {
-    if (!typing) return
-    window.watson.focus()
-    setTimeout(() => inputRef.current?.focus(), 120)
-  }, [typing])
-
-  const mode: Mode = s ? modeOf(s, typing) : 'pill'
+  const mode: Mode = s ? modeOf(s) : 'pill'
   const hold = useHoldToMove(() => window.watson.toggleListen(), mode === 'pill')
 
   if (!s) return null
 
   const jobs = s.jobs.filter((j) => !['done', 'failed'].includes(j.status))
-  const reviewing = isReviewing(s)
   // At rest it's a circle (unless the user chose the pill); it grows to say what's going on.
   const shown = s.arranging ? null : live
   const circle = mode === 'pill' && s.pillShape === 'circle' && !shown
@@ -248,17 +309,8 @@ export function Overlay() {
     window.watson.setInteractive(false)
   }
 
-  const submit = () => {
-    const text = draft.trim()
-    if (!text) return
-    window.watson.ask(text)
-    setDraft('')
-  }
-
-  const startTyping = () => {
-    window.watson.cancel()
-    setTyping(true)
-  }
+  // Typing goes into the same editor as dictation: one place for unsent words.
+  const startTyping = () => window.watson.takeOver('')
 
   return (
     <div className="stage">
@@ -270,7 +322,7 @@ export function Overlay() {
         onMouseLeave={leave}
         initial={false}
         style={up ? { bottom: 4, top: 'auto', transformOrigin: '50% 100%' } : { top: 4, bottom: 'auto', transformOrigin: '50% 0%' }}
-        animate={{ left, width, height: circle ? 38 : contentH || 38, borderRadius: mode === 'pill' ? 19 : mode === 'compact' ? 31 : 28, scale: hold.holding ? 1.08 : 1 }}
+        animate={{ left, width, height: circle ? 38 : contentH || 38, borderRadius: mode === 'pill' ? 19 : mode === 'compact' ? 31 : mode === 'dictate' ? 26 : 28, scale: hold.holding ? 1.08 : 1 }}
         whileHover={mode === 'pill' && !hold.holding ? { scale: 1.04 } : undefined}
         transition={SPRING}
       >
@@ -306,7 +358,8 @@ export function Overlay() {
                       {shown?.tone === 'done' && <Check size={11} />}
                       {shown?.tone === 'attention' && <Warning size={11} />}
                       {shown?.tone === 'event' && <span className="pill-event-dot" />}
-                      {pillText}
+                      {shown?.tone === 'unsent' && <Pencil size={11} />}
+                      <span className="pill-text">{pillText}</span>
                     </motion.span>
                   </AnimatePresence>
                 )}
@@ -324,7 +377,15 @@ export function Overlay() {
                 transition={{ duration: 0.2 }}
               >
                 <Orb phase={s.phase} size={34} />
-                <div className="compact-text">
+                <div
+                  className={s.phase === 'listening' ? 'compact-text typeable' : 'compact-text'}
+                  onClick={(e) => {
+                    // Click your words to finish by typing.
+                    if (s.phase !== 'listening') return
+                    e.stopPropagation()
+                    startTyping()
+                  }}
+                >
                   {s.phase === 'listening' && (
                     <div className={s.transcript ? 'transcript' : 'transcript placeholder'}>
                       {s.transcript || 'Listening…'}
@@ -339,28 +400,21 @@ export function Overlay() {
                   {s.phase === 'speaking' && <div className="caption">{tail(s.reply, 160)}</div>}
                 </div>
                 {s.phase === 'listening' && <Bars />}
-                {s.phase === 'listening' && (
-                  <div className="mode-switch" onClick={(e) => e.stopPropagation()}>
-                    <button className={s.capture === 'live' ? 'on' : ''} onClick={() => window.watson.setCapture('live')} title="Answer as soon as I stop talking">
-                      Live
-                    </button>
-                    <button className={s.capture === 'review' ? 'on' : ''} onClick={() => window.watson.setCapture('review')} title="Show my words so I can edit them first">
-                      <Pencil size={11} /> Review
-                    </button>
-                  </div>
-                )}
-                {s.phase === 'listening' && (
-                  <button
-                    className="icon-btn subtle"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      startTyping()
-                    }}
-                    aria-label="Type instead"
-                  >
-                    <Keyboard size={16} />
-                  </button>
-                )}
+                {s.phase === 'speaking' && <MuteButton s={s} />}
+              </motion.div>
+            )}
+
+            {mode === 'dictate' && (
+              <motion.div
+                key="dictate"
+                className="dictate"
+                initial={{ opacity: 0, filter: 'blur(8px)' }}
+                animate={{ opacity: 1, filter: 'blur(0px)' }}
+                exit={{ opacity: 0, filter: 'blur(8px)' }}
+                transition={{ duration: 0.2 }}
+              >
+                {s.error && <ErrorCard message={s.error} />}
+                <DraftEditor s={s} />
               </motion.div>
             )}
 
@@ -378,17 +432,14 @@ export function Overlay() {
                     <Orb phase={s.phase} size={30} />
                   </button>
                   <div className="panel-titles">
-                    <div className={s.phase === 'thinking' ? 'panel-title shimmer' : 'panel-title'}>
-                      {reviewing ? (s.phase === 'listening' ? 'Listening…' : 'Review and send') : statusText(s)}
-                    </div>
-                    {!reviewing && s.panel?.subtitle && s.phase === 'idle' && <div className="panel-sub">{s.panel.subtitle}</div>}
+                    <div className={s.phase === 'thinking' ? 'panel-title shimmer' : 'panel-title'}>{statusText(s)}</div>
+                    {s.panel?.subtitle && s.phase === 'idle' && <div className="panel-sub">{s.panel.subtitle}</div>}
                   </div>
                   <div className="panel-actions">
-                    {!reviewing && (
-                      <button className="icon-btn" onClick={() => (typing ? setTyping(false) : startTyping())} aria-label="Type">
-                        {typing ? <Mic size={16} /> : <Keyboard size={16} />}
-                      </button>
-                    )}
+                    <button className="icon-btn" onClick={startTyping} aria-label="Type">
+                      <Keyboard size={16} />
+                    </button>
+                    <MuteButton s={s} />
                     <button className="icon-btn" onClick={() => window.watson.openWindow()} aria-label="Open the Watson window" title="Open the Watson window">
                       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                         <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />
@@ -399,10 +450,7 @@ export function Overlay() {
                     </button>
                     <button
                       className="icon-btn"
-                      onClick={() => {
-                        setTyping(false)
-                        window.watson.dismiss()
-                      }}
+                      onClick={() => window.watson.dismiss()}
                       aria-label="Close"
                     >
                       <Close size={15} />
@@ -410,17 +458,7 @@ export function Overlay() {
                   </div>
                 </header>
 
-                {reviewing ? (
-                  <>
-                    {s.error && (
-                      <div className="panel-scroll">
-                        <ErrorCard message={s.error} />
-                      </div>
-                    )}
-                    <DraftEditor s={s} />
-                  </>
-                ) : (
-                  <>
+                <>
                     {s.activity.length > 0 && (
                       <div className="steps">
                         <AnimatePresence initial={false}>
@@ -495,25 +533,10 @@ export function Overlay() {
                       )}
                     </div>
 
-                    {typing && (
-                      <form
-                        className="ask"
-                        onSubmit={(e) => {
-                          e.preventDefault()
-                          submit()
-                        }}
-                      >
-                        <input ref={inputRef} value={draft} onChange={(e) => setDraft(e.target.value)} placeholder="Ask Watson…" spellCheck={false} />
-                        <button type="submit" className="send" disabled={!draft.trim()} aria-label="Send">
-                          <ArrowUp size={15} />
-                        </button>
-                      </form>
-                    )}
-                  </>
-                )}
+                </>
 
                 <footer className="panel-foot">
-                  <span>{reviewing ? 'Return to send · Esc to discard' : 'Esc to close'}</span>
+                  <span>Esc to close</span>
                   <span>${s.usageTodayUsd.toFixed(3)} today</span>
                 </footer>
               </motion.div>

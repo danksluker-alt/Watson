@@ -16,7 +16,7 @@ const elapsed = (ms: number) => {
 }
 const short = (t: string, n = 20) => (t.length > n ? `${t.slice(0, n - 1)}…` : t)
 
-export type LiveTone = 'job' | 'timer' | 'event' | 'done' | 'attention'
+export type LiveTone = 'job' | 'timer' | 'event' | 'done' | 'attention' | 'unsent'
 export type LiveItem = { key: string; text: string; tone: LiveTone }
 
 const RECENT_MS = 12_000
@@ -82,7 +82,9 @@ export function useLive(s: UIState | null): LiveItem | null {
     return () => clearInterval(r)
   }, [])
   if (!s) return null
+  const draft = s.draftParked && s.draft?.text.trim() ? [{ key: 'draft', text: short(s.draft.text.trim(), 26), tone: 'unsent' as const }] : []
   const items = [
+    ...draft,
     ...jobItems(s.jobs, now),
     ...timerItems(s.timers, now),
     ...(s.glance.nextEvent ? [eventItem(s.glance.nextEvent, now)].filter((x): x is LiveItem => Boolean(x)) : []),

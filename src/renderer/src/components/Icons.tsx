@@ -33,6 +33,13 @@ export const Mic = ({ size, ...p }: P) => (
   </svg>
 )
 
+export const Speaker = ({ size, off, ...p }: P & { off?: boolean }) => (
+  <svg {...base(size)} {...p} stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4 9.5h3.5L12 5.5v13l-4.5-4H4z" />
+    {off ? <path d="M16 9.5l5 5M21 9.5l-5 5" /> : <path d="M16 9a4.5 4.5 0 0 1 0 6M18.6 6.5a8 8 0 0 1 0 11" />}
+  </svg>
+)
+
 export const ArrowUp = ({ size, ...p }: P) => (
   <svg {...base(size)} {...p} stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 19V5M6 11l6-6 6 6" />

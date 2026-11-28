@@ -37,6 +37,7 @@ export const DEFAULT_SETTINGS: Settings = {
   inputMode: 'review',
   wakeWord: false,
   voiceGender: 'any',
+  muted: false,
   sounds: true,
   musicApp: 'spotify',
   browserBundleId: '',

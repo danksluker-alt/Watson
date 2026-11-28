@@ -72,7 +72,10 @@ const WALLPAPER = `html[data-view='overlay'] body { background: radial-gradient(
 await overlay.addStyleTag({ content: WALLPAPER })
 
 async function reset() {
-  await overlay.evaluate(() => window.watson.dismiss())
+  await overlay.evaluate(() => {
+    window.watson.cancelDraft()
+    window.watson.dismiss()
+  })
   await until(async () => (await overlay.$('.pill')) !== null, 5000)
   await helper('/reset', {})
   await sleep(250)
@@ -82,7 +85,7 @@ async function talk(text, { review = false } = {}) {
   if (await overlay.$('.pill')) await overlay.click('.pill')
   else await overlay.evaluate(() => window.watson.toggleListen())
   await until(async () => (await helper('/state')).listening, 4000)
-  if (review) await overlay.click('.mode-switch button:has-text("Review")')
+  if (review) await overlay.evaluate(() => window.watson.setCapture('review'))
   await helper('/say', { text })
 }
 
@@ -145,7 +148,9 @@ await scenario('Click opens dictation: nothing is sent until Send', async () => 
     await sleep(1200)
     assert(!(await apiRequests()).some((r) => r.text.includes('Lisbon')), 'sent before pressing Send')
     assert(!(await helper('/state')).listening, 'still listening after the words were in')
-    assert((await overlay.textContent('.draft-targets .chip.on')).includes('Auto'), 'Auto should be the default target')
+    assert((await overlay.textContent('.route')).includes('Auto'), 'Auto should be the default target')
+    // Clean: the choices are one level down, not on the first view.
+    assert(!(await overlay.$('.draft-targets')), 'AI choices shown before asking for them')
     await shot('01c-dictation')
     await overlay.click('.send-btn')
     await overlay.waitForSelector('.weather', { timeout: 10_000 })
@@ -160,6 +165,69 @@ await scenario('Click opens dictation: nothing is sent until Send', async () => 
   }
 })
 
+await scenario('While talking only your words show; click them to type', async () => {
+  await setMode('review')
+  try {
+    await overlay.click('.pill')
+    await until(async () => (await helper('/state')).listening, 4000)
+    await helper('/partial', { text: 'Write a long note to the team about the' })
+    await overlay.waitForSelector('.dictation', { timeout: 5000 })
+    assert(!(await overlay.$('.send-btn')), 'Send shown while still talking')
+    assert(!(await overlay.$('.chip')), 'choices shown while still talking')
+    await shot('01d-dictating')
+    await overlay.click('.dictation-text')
+    await overlay.waitForSelector('.draft textarea', { timeout: 5000 })
+    await until(async () => !(await helper('/state')).listening, 4000)
+    assert((await overlay.inputValue('.draft textarea')).includes('note to the team'), 'words heard so far were lost')
+    assert(await overlay.$('.send-btn'), 'no Send button after taking over')
+    return 'clean while talking; a click stopped the mic and kept the words for typing'
+  } finally {
+    await setMode('live')
+  }
+})
+
+await scenario('An unsent message is kept when you click away', async () => {
+  await setMode('review')
+  try {
+    await talk('remind the team about the offsite agenda', { review: true })
+    await overlay.waitForSelector('.draft textarea', { timeout: 8000 })
+    await overlay.fill('.draft textarea', 'A long prompt I spent a while writing about the offsite agenda')
+    await sleep(600) // edits are saved as you type
+    // Esc (or clicking away) puts it in the pill instead of throwing it away.
+    await overlay.keyboard.press('Escape')
+    await overlay.waitForSelector('.pill-label.unsent', { timeout: 5000 })
+    await shot('01e-draft-kept')
+    const saved = JSON.parse(fs.readFileSync(path.join(userData, 'draft.json'), 'utf8'))
+    assert(saved.text.includes('spent a while'), 'draft not saved to disk')
+    assert(!(await apiRequests()).some((r) => r.text.includes('offsite')), 'sent without Send')
+    await overlay.click('.pill')
+    await overlay.waitForSelector('.draft textarea', { timeout: 5000 })
+    assert((await overlay.inputValue('.draft textarea')).includes('spent a while'), 'the edited text came back different')
+    assert(!(await helper('/state')).listening, 'reopening a draft turned the mic on')
+    await overlay.click('.btn.ghost:has-text("Discard")')
+    await until(async () => !fs.existsSync(path.join(userData, 'draft.json')), 4000)
+    return 'Esc kept it in the pill, a click brought it back, Discard removed it'
+  } finally {
+    await setMode('live')
+  }
+})
+
+await scenario('Mute Watson: answers show instead of being spoken', async () => {
+  await overlay.evaluate(() => window.watson.setMuted(true))
+  try {
+    await talk('How tall is the Eiffel Tower?')
+    await overlay.waitForSelector('.reply', { timeout: 10_000 })
+    await until(async () => (await overlay.textContent('.reply')).includes('330'), 10_000)
+    await sleep(800)
+    assert(!(await spokenText()).includes('330'), 'spoke while muted')
+    assert(await overlay.$('.icon-btn.muted'), 'no muted button showing')
+    await shot('01f-muted')
+    return 'the answer was on screen and nothing was spoken'
+  } finally {
+    await overlay.evaluate(() => window.watson.setMuted(false))
+  }
+})
+
 await scenario('Talk live from the dictation box', async () => {
   await setMode('review')
   try {
@@ -167,7 +235,8 @@ await scenario('Talk live from the dictation box', async () => {
     await until(async () => (await helper('/state')).listening, 4000)
     await helper('/say', { text: 'How tall is the Eiffel Tower?' })
     await overlay.waitForSelector('.draft textarea', { timeout: 8000 })
-    await overlay.click('.draft-actions button:has-text("Talk live")')
+    await overlay.click('.route')
+    await overlay.click('.draft-more button:has-text("Talk live")')
     await until(async () => (await spokenText()).includes('330 meters'), 10_000)
     // Live: it keeps listening for a follow-up.
     await until(async () => (await helper('/state')).listening, 10_000)
@@ -310,6 +379,8 @@ await scenario('Dictate, edit, then send to Claude (review mode)', async () => {
   await until(async () => (await overlay.inputValue('.draft textarea')).includes('launch'), 4000)
   await shot('08-review-draft')
   await overlay.fill('.draft textarea', 'Draft a short, upbeat tweet announcing that Watson launches this Friday.')
+  await overlay.click('.route')
+  await shot('09a-review-more')
   await overlay.click('.draft-targets .chip:has-text("Claude")')
   await shot('09-review-edited')
   await overlay.press('.draft textarea', 'Enter')
@@ -323,6 +394,7 @@ await scenario('Dictate, edit, then send to Claude (review mode)', async () => {
 await scenario('Dictate into the app you were using', async () => {
   await talk('see you at the offsite on thursday', { review: true })
   await overlay.waitForSelector('.draft textarea', { timeout: 8000 })
+  await overlay.click('.route')
   await overlay.click('.draft-targets .chip:has-text("Type into")')
   await overlay.click('.send-btn')
   const ins = await until(async () => (await helper('/state')).inserted[0], 8000)

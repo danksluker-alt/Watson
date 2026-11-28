@@ -144,10 +144,21 @@ export function SettingsPage() {
     const poll = () => void window.watson.permissions().then(setPerm)
     poll()
     const t = setInterval(poll, 3000)
-    return () => clearInterval(t)
+    // Voices downloaded in System Settings show up when you come back.
+    const refresh = () => void window.watson.voices().then(setVoices)
+    window.addEventListener('focus', refresh)
+    return () => {
+      clearInterval(t)
+      window.removeEventListener('focus', refresh)
+    }
   }, [])
 
   const save = async (patch: Partial<Settings>) => setS(await window.watson.setSettings(patch))
+  // A new voice is heard right away.
+  const saveVoice = async (patch: Partial<Settings>) => {
+    await save(patch)
+    window.watson.testVoice()
+  }
 
   const lang = s?.speechLocale.slice(0, 2) ?? 'en'
   const voiceOptions = useMemo(() => {
@@ -207,7 +218,7 @@ export function SettingsPage() {
         title="Voice"
         footer={
           <>
-            For the most natural voice, download a Premium voice: System Settings → Accessibility → Spoken Content → System Voice → Manage Voices. Then pick it here.
+            The most human voices are Apple’s Siri voices, a free download in System Settings → Accessibility → Spoken Content → System voice → Manage Voices.
           </>
         }
       >
@@ -233,21 +244,24 @@ export function SettingsPage() {
         <Row label="Sounds" hint="Soft chimes when Watson listens and answers">
           <Toggle on={s.sounds} onChange={(v) => save({ sounds: v })} />
         </Row>
-        <Row label="Voice" hint={s.voiceGender === 'male' && !naturalMale ? 'No natural male voice yet: get one free with “Get more voices” (Siri voices sound most human)' : undefined}>
+        <Row label="Mute Watson" hint="Answers are shown instead of spoken. Your Mac’s sound isn’t changed.">
+          <Toggle on={s.muted} onChange={(v) => { window.watson.setMuted(v); setS({ ...s, muted: v }) }} />
+        </Row>
+        <Row label="Voice" hint={s.voiceGender === 'male' && !naturalMale ? 'Your Mac only has basic male voices. Get a natural one free with “Get more voices”.' : undefined}>
           <div className="segmented light">
             {(['male', 'female', 'any'] as const).map((g) => (
-              <button key={g} className={s.voiceGender === g ? 'on' : ''} onClick={() => save({ voiceGender: g, voiceId: '' })}>
+              <button key={g} className={s.voiceGender === g ? 'on' : ''} onClick={() => saveVoice({ voiceGender: g, voiceId: '' })}>
                 {g === 'male' ? 'Male' : g === 'female' ? 'Female' : 'Any'}
               </button>
             ))}
           </div>
         </Row>
         <Row label="">
-          <select value={s.voiceId} onChange={(e) => save({ voiceId: e.target.value })}>
-            <option value="">Best available</option>
+          <select value={voiceOptions.some((v) => v.id === s.voiceId) ? s.voiceId : ''} onChange={(e) => saveVoice({ voiceId: e.target.value })}>
+            <option value="">Most natural</option>
             {voiceOptions.map((v) => (
               <option key={v.id} value={v.id}>
-                {v.name} ({v.language}){v.quality === 'premium' ? ' · Premium' : v.quality === 'enhanced' ? ' · Enhanced' : ''}
+                {v.name} ({v.language}){v.quality === 'premium' ? ' · Premium' : v.quality === 'enhanced' ? ' · Enhanced' : v.quality === 'siri' ? '' : ' · Basic'}
               </option>
             ))}
           </select>

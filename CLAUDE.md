@@ -95,8 +95,17 @@
   idle. Opening the dashboard ends live talk. The hotkey clears `tucked`.
 - `ax.send` gives an app that wasn't running more time to launch (30 s to come forward, 15 s for its box).
 - Voice: `voiceGender` (male/female/any) is sent to the helper; `selectedVoice()` ranks by `naturalness`
-  (Siri natural voices > Premium > Enhanced > compact; novelty/eloquence voices last) and takes the wanted
-  gender only if it has an Enhanced-or-better voice. Settings has "Get more voices" (Spoken Content pane).
+  (Siri natural voices > Premium > Enhanced > compact; novelty/eloquence voices last) and always respects a
+  chosen gender (its most natural voice, any accent if the region has none). Settings plays a sample on change.
+- `muted` (setting, `ui:setMuted`): `say()` sends nothing and expands the panel; `speakText` then calls
+  `afterSpeech` itself. Muting mid-speech stops it.
+- Dictation UI (`mode: 'dictate'` in Overlay.tsx): while listening only the words (`.dictation`); a click
+  calls `takeOver` (mic off, words kept in the draft). After: textarea + `.route` button + Discard/Send; the
+  `.route` button opens `.draft-more` (destinations, Keep talking, Talk live). Typing uses the same draft.
+- Unsent draft: synced as you type (`ui:draftText`), saved to `draft.json` (`src/main/savedDraft.ts`).
+  Esc or the overlay losing focus parks it (`draftParked`): the pill shows it (tone `unsent`) and a click
+  reopens it (`openDraft`). Only Discard/Send clear it. Under 20 words it expires after 12 h; 20+ never.
+  Code that means "a draft is open" uses `activeDraft()`, not `store.state.draft`. Settings has "Get more voices" (Spoken Content pane).
 - Mic watchdog: while listening, no audio buffers for 1.2 s rebuilds the engine (`restartMic`, max 3 per
   10 s). Config-change notifications within 1.5 s of our own start are ignored (echo cancellation causes
   one). After a change, the engine is rebuilt, not reused (reuse once left recognition deaf for a minute).

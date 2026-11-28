@@ -23,6 +23,8 @@ export class Store extends EventEmitter {
     insertTargetName: null,
     agents: [],
     sounds: true,
+    muted: false,
+    draftParked: false,
     timers: [],
     ringing: null,
     layout: { centerX: 380, dir: 'down' },

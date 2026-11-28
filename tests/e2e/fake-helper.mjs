@@ -296,6 +296,12 @@ http
       req.on('end', () => r(b ? JSON.parse(b) : {}))
     })
     res.setHeader('Content-Type', 'application/json')
+    if (req.url === '/partial') {
+      // Words heard so far, with no end yet (the user is still talking).
+      if (!listening) return res.end(JSON.stringify({ ok: false }))
+      out({ ev: 'partial', text: body.text, session })
+      return res.end(JSON.stringify({ ok: true }))
+    }
     if (req.url === '/say') {
       const ok = await say(body.text)
       res.statusCode = ok ? 200 : 409

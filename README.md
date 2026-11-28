@@ -75,18 +75,26 @@ read aren't lost.
 
 | | How | What happens |
 |---|---|---|
-| **Dictate, then send** (default) | Click the circle, or ⌥ Space | Your words appear in a box as you speak. Nothing is sent until you press **Send** (or Return), and you can fix the text first. **Auto** lets Watson answer or hand it to Claude or Grok (or name one: "ask Grok…"); you can also pick an AI or "Type into <app>". Watson speaks the answer, then the microphone goes off. |
-| **Talk live** | **Talk live** in the dictation box, ⌥⇧ Space, the right-click menu, or say **"Hey Watson"** | A spoken conversation: Watson answers as soon as you stop, you can talk over it, and it listens a few seconds for a follow-up. |
+| **Dictate, then send** (default) | Click the circle, or ⌥ Space | While you talk, only your words show. Click them to finish by typing (the microphone stops). When you stop, **Send** (or Return) and **Discard** appear; nothing is sent before that. The **Auto** button under the text opens the choices: where it goes (Auto lets Watson answer or hand it to Claude or Grok; or pick an AI or "Type into <app>"), **Keep talking** and **Talk live**. Watson speaks the answer, then the microphone goes off. |
+| **Talk live** | **Talk live** under the dictation box's **Auto** button, ⌥⇧ Space, the right-click menu, or say **"Hey Watson"** | A spoken conversation: Watson answers as soon as you stop, you can talk over it, and it listens a few seconds for a follow-up. |
 
 Settings → Voice swaps which one the click and ⌥ Space use. **Listen for "Hey Watson"** is off unless
 you turn it on: it listens on this Mac only (on-device speech recognition, nothing is sent anywhere),
 and macOS shows the orange microphone dot while Watson is idle.
 
-Right-click the circle for: dictate, talk live, **Open dashboard**, move or change shape, "Hey Watson",
-and Settings.
+Right-click the circle for: dictate, talk live, **Mute Watson**, **Open dashboard**, move or change
+shape, "Hey Watson", and Settings.
 
-**Voice:** Settings → Voice → **Male / Female**. Watson uses the most natural voice of that kind on your
-Mac: Siri's voices first, then Premium and Enhanced ones. **Get more voices** opens System Settings →
+**Unsent words are never lost.** Clicking away from the box or pressing Esc puts the message in the pill
+(it shows its first words); click the pill to get it back. Only **Discard** deletes it. It's saved on
+disk, so it survives a restart. Messages of 20 words or more are kept until you send or discard them;
+shorter ones are let go after 12 hours. Only one unsent message is kept, so nothing piles up.
+
+**Mute Watson** (the speaker button on the panel, while it talks, in the right-click menu or in
+Settings): answers are shown instead of spoken. Your Mac's sound isn't touched.
+
+**Voice:** Settings → Voice → **Male / Female**. Watson always uses that kind of voice, the most natural
+one on your Mac: Siri's voices first, then Premium and Enhanced ones; a change plays a sample right away. **Get more voices** opens System Settings →
 Accessibility → Spoken Content, where they're a free download.
 
 ## How it's built
