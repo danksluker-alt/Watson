@@ -115,9 +115,10 @@ The first run opens Settings:
 2. Allow **Microphone**, **Speech Recognition**, **Calendars** and **Reminders** when macOS asks.
 3. Turn on **Accessibility** for hand-offs and dictation: System Settings → Privacy & Security →
    Accessibility. In development the entry is "Electron"; in the built app it's "Watson".
-4. Under **Agents**, turn on the AIs you use. Claude (Mac app) and Grok (grok.com) are on by default.
-   You can add any running app, or any chat website by URL. Sign in to the websites once in
-   your browser.
+4. Under **Agents**, turn on the AIs you use. Watson lists the AI apps it finds on your Mac
+   (Claude, ChatGPT, Codex, Grok, Perplexity, Gemini, Copilot…) with an **Add** button; any other app
+   can be picked from a list, and any chat website added by URL. An app takes over the name of a
+   website agent ("ask Grok" goes to the Grok app once it's added).
 5. Optional: download a **Premium voice** (System Settings → Accessibility → Spoken Content →
    System Voice → Manage Voices) and pick it under Voice.
 

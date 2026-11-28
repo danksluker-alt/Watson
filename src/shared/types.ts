@@ -273,6 +273,7 @@ export type WatsonAPI = {
   requestPermissions: () => Promise<PermissionStatus | null>
   openPrivacyPane: (pane: 'Microphone' | 'SpeechRecognition' | 'Accessibility' | 'Automation' | 'Calendars' | 'Reminders') => void
   testVoice: () => void
+  installedApps: () => Promise<{ name: string; bundleId: string }[]>
   cancelTimer: (id: string) => void
   stopRinging: () => void
 }

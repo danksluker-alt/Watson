@@ -44,3 +44,9 @@
   `findInput` would pick (both read-only). `findInput` only accepts a text area or a field labelled
   like a chat box, never form fields (name, age, email, password, search): grok.com once showed an
   age form whose "Age" field would otherwise have received the prompt.
+- Agent discovery: `src/shared/aiApps.ts` (catalog of AI app bundle ids, `addAppAgent`) and
+  `installedApps()` in `src/main/tools/apps.ts`. Grok Bot (`com.anysphere.sand`) has no New Chat menu;
+  its assistant labels itself "Atlas". `extract.ts` drops sender labels (names seen in "<name>
+  replied" or repeated), times and date separators. Fixture: `tests/fixtures/grok-bot-ready.json`.
+- e2e sets `WATSON_INVISIBLE=1`: test windows are transparent and unfocusable, so test runs don't
+  flash the purple test wallpaper on the owner's screen.

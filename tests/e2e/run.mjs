@@ -40,6 +40,7 @@ const app = await _electron.launch({
     WATSON_FAKE_OS: '1',
     WATSON_USER_DATA: userData,
     WATSON_POLL_MS: '400',
+    WATSON_INVISIBLE: '1',
     ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
   },
 })

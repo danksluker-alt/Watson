@@ -11,6 +11,7 @@ import { Speaker } from './speaker'
 import { Store } from './store'
 import * as music from './tools/music'
 import { setExecBridge } from './tools/os'
+import { installedApps } from './tools/apps'
 import { getStock } from './tools/stocks'
 import { spentToday } from './usage'
 import { timerName, timers as timerStore } from './timers'
@@ -60,8 +61,16 @@ function load(win: BrowserWindow, hash = '') {
   else void win.loadFile(path.join(__dirname, '../renderer/index.html'), { hash })
 }
 
+/** Tests run the real app; WATSON_INVISIBLE keeps its windows off the user's screen (still rendered for screenshots). */
+const INVISIBLE = Boolean(process.env.WATSON_INVISIBLE)
+
 function makeWindow(hash: string, opts: Electron.BrowserWindowConstructorOptions): BrowserWindow {
-  const win = new BrowserWindow({ ...opts, webPreferences: { preload: PRELOAD(), sandbox: true, contextIsolation: true } })
+  const win = new BrowserWindow({
+    ...opts,
+    ...(INVISIBLE ? { focusable: false } : {}),
+    webPreferences: { preload: PRELOAD(), sandbox: true, contextIsolation: true, backgroundThrottling: !INVISIBLE },
+  })
+  if (INVISIBLE) win.setOpacity(0)
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:/.test(url)) void shell.openExternal(url)
     return { action: 'deny' }
@@ -110,7 +119,7 @@ function openSettings() {
   if (settingsWin && !settingsWin.isDestroyed()) {
     settingsWin.show()
     settingsWin.focus()
-    app.focus({ steal: true })
+    if (!INVISIBLE) app.focus({ steal: true })
     return
   }
   settingsWin = makeWindow('settings', {
@@ -126,6 +135,7 @@ function openSettings() {
     show: false,
   })
   settingsWin.once('ready-to-show', () => {
+    if (INVISIBLE) return void settingsWin?.showInactive()
     settingsWin?.show()
     app.focus({ steal: true })
   })
@@ -817,6 +827,7 @@ function registerIpc() {
     return status
   })
   ipcMain.handle('helper:voices', async () => (helper.ready ? helper.request<VoiceInfo[]>('voices') : []))
+  ipcMain.handle('apps:installed', () => installedApps().catch(() => []))
   ipcMain.handle('helper:apps', async () => (helper.ready ? helper.request<RunningApp[]>('apps.running') : []))
   ipcMain.handle('helper:permissions', async () => (helper.ready ? helper.request<PermissionStatus>('permissions') : null))
   ipcMain.handle('helper:requestPermissions', async () =>

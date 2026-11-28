@@ -16,14 +16,33 @@ const CHROME = [
   /^\w+ (finished|stopped) the response$/i,
   /^newest document available to open/i,
   /^use the up and down arrow keys/i,
-  /^\d{1,2}:\d{2}( ?[ap]m)?$/i,
+  /^((today|yesterday|mon|tue|wed|thu|fri|sat|sun)\w*,? )?\d{1,2}:\d{2}( ?[ap]m)?$/i,
+  /^[\w .'-]{1,24} (replied|responded|is typing…?)$/i,
 ]
 
 // Screen-reader copies of each message ("You said: …", "Claude responded: …"); the visible copy follows.
 const SPOKEN_COPY = /^(you said|claude responded|chatgpt said|grok said|assistant said):\s/i
 
+/**
+ * Chat apps put a sender label over each message ("You", "Atlas"). A label is a short name that
+ * the app also uses in "<name> replied", or that repeats on its own line.
+ */
+function speakerLabels(lines: string[]): Set<string> {
+  const labels = new Set<string>(['you'])
+  const counts = new Map<string, number>()
+  for (const raw of lines) {
+    const l = raw.trim()
+    const m = /^([\w .'-]{1,24}) (replied|responded)$/i.exec(l)
+    if (m) labels.add(m[1].toLowerCase())
+    if (/^[A-Z][\w'-]*( [A-Z][\w'-]*)?$/.test(l)) counts.set(l.toLowerCase(), (counts.get(l.toLowerCase()) ?? 0) + 1)
+  }
+  for (const [name, n] of counts) if (n >= 3) labels.add(name)
+  return labels
+}
+
 export function cleanLines(lines: string[]): string[] {
-  return lines.map((l) => l.trim()).filter((l) => l && !SPOKEN_COPY.test(l) && !CHROME.some((re) => re.test(l)))
+  const labels = speakerLabels(lines)
+  return lines.map((l) => l.trim()).filter((l) => l && !SPOKEN_COPY.test(l) && !labels.has(l.toLowerCase()) && !CHROME.some((re) => re.test(l)))
 }
 
 /**

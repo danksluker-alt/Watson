@@ -1,6 +1,7 @@
 // Settings, laid out like macOS System Settings: grouped, inset rows.
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { AgentTarget, PermissionStatus, RunningApp, SecretName, SecretStatus, Settings, VoiceInfo } from '@shared/types'
+import { addAppAgent, isAiApp, type InstalledApp } from '@shared/aiApps'
+import type { AgentTarget, PermissionStatus, SecretName, SecretStatus, Settings, VoiceInfo } from '@shared/types'
 import { Check, Warning } from './components/Icons'
 import { Orb } from './components/Orb'
 
@@ -36,11 +37,6 @@ const host = (u?: string) => {
   }
 }
 
-const KNOWN_AGENTS: Record<string, string> = {
-  'com.anthropic.claudefordesktop': 'Claude',
-  'com.openai.chat': 'ChatGPT',
-  'ai.perplexity.mac': 'Perplexity',
-}
 
 function Group({ title, footer, children }: { title?: string; footer?: ReactNode; children: ReactNode }) {
   return (
@@ -137,14 +133,14 @@ export function SettingsPage() {
   const [s, setS] = useState<Settings | null>(null)
   const [secrets, setSecrets] = useState<SecretStatus | null>(null)
   const [voices, setVoices] = useState<VoiceInfo[]>([])
-  const [apps, setApps] = useState<RunningApp[]>([])
+  const [installed, setInstalled] = useState<InstalledApp[]>([])
   const [perm, setPerm] = useState<PermissionStatus | null>(null)
 
   useEffect(() => {
     void window.watson.getSettings().then(setS)
     void window.watson.secretStatus().then(setSecrets)
     void window.watson.voices().then(setVoices)
-    void window.watson.runningApps().then(setApps)
+    void window.watson.installedApps().then(setInstalled)
     const poll = () => void window.watson.permissions().then(setPerm)
     poll()
     const t = setInterval(poll, 3000)
@@ -163,7 +159,7 @@ export function SettingsPage() {
 
   if (!s || !secrets) return <div className="settings" />
 
-  const addableApps = apps.filter((a) => !s.agents.some((g) => g.bundleId === a.bundleId))
+  const foundAi = installed.filter((a) => isAiApp(a) && !s.agents.some((g) => g.bundleId === a.bundleId))
   const setAgent = (id: string, patch: Partial<AgentTarget>) => save({ agents: s.agents.map((a) => (a.id === id ? { ...a, ...patch } : a)) })
 
   return (
@@ -277,23 +273,29 @@ export function SettingsPage() {
             <Toggle on={a.enabled} onChange={(v) => setAgent(a.id, { enabled: v })} />
           </Row>
         ))}
-        <Row label="Add an app" hint="Open it first, then pick it here">
+        {foundAi.map((a) => (
+          <Row key={a.bundleId} label={a.name} hint="AI app found on this Mac">
+            <button className="btn small primary" onClick={() => void save({ agents: addAppAgent(s.agents, a) })}>
+              Add
+            </button>
+          </Row>
+        ))}
+        <Row label="Add another app" hint="Any app on this Mac">
           <select
             value=""
             onChange={(e) => {
-              const app = apps.find((x) => x.bundleId === e.target.value)
-              if (!app) return
-              const id = app.name.toLowerCase().replace(/[^a-z0-9]+/g, '-')
-              void save({ agents: [...s.agents, { id, name: KNOWN_AGENTS[app.bundleId] ?? app.name, kind: 'app', bundleId: app.bundleId, enabled: true }] })
+              const app = installed.find((x) => x.bundleId === e.target.value)
+              if (app) void save({ agents: addAppAgent(s.agents, app) })
             }}
-            onFocus={() => void window.watson.runningApps().then(setApps)}
           >
-            <option value="">Choose a running app…</option>
-            {addableApps.map((a) => (
-              <option key={a.bundleId} value={a.bundleId}>
-                {a.name}
-              </option>
-            ))}
+            <option value="">Choose an app…</option>
+            {installed
+              .filter((a) => !s.agents.some((g) => g.bundleId === a.bundleId))
+              .map((a) => (
+                <option key={a.bundleId} value={a.bundleId}>
+                  {a.name}
+                </option>
+              ))}
           </select>
         </Row>
         <Row label="Add a chat website" hint="Any AI you use in the browser">

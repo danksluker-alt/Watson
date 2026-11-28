@@ -1,0 +1,26 @@
+{
+  "_about": "Real Accessibility snapshot of the Grok Bot desktop app (com.anysphere.sand, Electron) after Watson sent a test prompt, Nov 2026. Earlier messages in the conversation are replaced with placeholder text; the structure (sender labels, times, date separators, the 'Atlas replied' line) is unchanged.",
+  "app": "com.anysphere.sand",
+  "prompt": "Reply with just the word ready, and nothing else.",
+  "after": {
+    "title": "Grok Bot",
+    "busy": false,
+    "lines": [
+      "Today 12:24 PM",
+      "Atlas",
+      "Placeholder: an earlier answer from the assistant.",
+      "12:24 PM",
+      "Atlas",
+      "Placeholder: a second earlier answer.",
+      "12:25 PM",
+      "Today 6:40 PM",
+      "You",
+      "Reply with just the word ready, and nothing else.",
+      "6:40 PM",
+      "Atlas",
+      "ready",
+      "6:40 PM",
+      "Atlas replied"
+    ]
+  }
+}

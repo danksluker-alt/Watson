@@ -76,3 +76,16 @@ test('rejoins paragraphs that the app split at bold words and links', () => {
     '1. Save your work.',
   ])
 })
+
+const grok = JSON.parse(fs.readFileSync(new URL('./fixtures/grok-bot-ready.json', import.meta.url), 'utf8'))
+
+test('real Grok Bot app: drops sender labels, times and "Atlas replied"', () => {
+  const r = replyFromWindows([], [grok.after], grok.prompt)
+  assert.equal(r.found, true)
+  assert.equal(r.reply, 'ready')
+})
+
+test('a one-off speaker name in a new chat is still dropped via "<name> replied"', () => {
+  const lines = ['You', grok.prompt, '6:40 PM', 'Nova', 'Sure, here it is.', '6:41 PM', 'Nova replied']
+  assert.equal(replyFromWindows([], [{ title: 'x', busy: false, lines }], grok.prompt).reply, 'Sure, here it is.')
+})
