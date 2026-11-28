@@ -333,6 +333,73 @@ await scenario('Typed question, visual answer', async () => {
   return 'table shown, nothing spoken'
 })
 
+await scenario('Pill: corner position and circle shape stay on screen', async () => {
+  const W = 760
+  // Put the pill in the bottom-right corner of the screen, as dragging it there would.
+  await overlay.evaluate(async () => {
+    const s = await window.watson.getSettings()
+    void s
+    await window.watson.setSettings({ pillPlace: { displayId: -1, fx: 0.97, fy: 0.95 } })
+  })
+  // displayId -1 doesn't exist, so it falls back to the default spot; use the real primary display.
+  const displayId = await app.evaluate(({ screen }) => screen.getPrimaryDisplay().id)
+  await overlay.evaluate((id) => window.watson.setSettings({ pillPlace: { displayId: id, fx: 0.97, fy: 0.95 } }), displayId)
+  await until(async () => (await overlay.evaluate(() => window.watson.getState())).layout.dir === 'up', 5000)
+  const st = await overlay.evaluate(() => window.watson.getState())
+  assert(st.layout.centerX > W / 2, `pill should sit right of centre, centerX=${st.layout.centerX}`)
+  // Open the panel: it must open upward and stay inside the window.
+  await talk('Compare the three plans')
+  await overlay.waitForSelector('table', { timeout: 10_000 })
+  await sleep(600)
+  const box = await overlay.evaluate(() => {
+    const r = document.querySelector('.island').getBoundingClientRect()
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, vw: innerWidth, vh: innerHeight }
+  })
+  assert(box.left >= 0 && box.right <= box.vw && box.top >= 0 && box.bottom <= box.vh, `panel cut off: ${JSON.stringify(box)}`)
+  assert(box.bottom > box.vh - 12, `panel should open upward from the bottom: ${JSON.stringify(box)}`)
+  await shot('25-corner-panel')
+  await reset()
+  await overlay.evaluate(() => window.watson.setPillShape('circle'))
+  await until(async () => (await overlay.evaluate(() => document.querySelector('.island')?.getBoundingClientRect().width)) <= 40, 5000)
+  await overlay.mouse.move(5, 5)
+  await sleep(500)
+  await overlay.screenshot({ path: path.join(shots, '26-circle.png') })
+  await overlay.evaluate(() => window.watson.setPillShape('pill'))
+  await overlay.evaluate(() => window.watson.resetPillPlace())
+  await until(async () => (await overlay.evaluate(() => window.watson.getState())).layout.dir === 'down', 5000)
+  return 'bottom-right corner: panel opened upward, fully on screen; circle 38 px'
+})
+
+await scenario('Watson window: chat history and hand-offs', async () => {
+  // It may already be open: a confirmation earlier ("send") brings it forward on its own.
+  const existing = app.windows().find((w) => w.url().includes('#home'))
+  const opened = existing ? null : app.waitForEvent('window', { timeout: 10_000 })
+  await overlay.evaluate(() => window.watson.openWindow())
+  const win = existing ?? (await opened)
+  await win.waitForSelector('.home', { timeout: 10_000 })
+  await win.setViewportSize({ width: 940, height: 700 }).catch(() => {})
+  await win.waitForSelector('.bubble.you', { timeout: 10_000 })
+  const you = await win.$$eval('.bubble.you', (els) => els.length)
+  assert(you >= 5, `only ${you} requests in the history`)
+  await sleep(400)
+  await win.screenshot({ path: path.join(shots, '27-window-chat.png') })
+  await win.click('nav button:has-text("Hand-offs")')
+  await win.waitForSelector('.job-card', { timeout: 5000 })
+  const agents = await win.$$eval('.job-agent', (els) => els.map((e) => e.textContent))
+  assert(agents.some((a) => a.includes('Grok')) && agents.some((a) => a.includes('Claude')), `hand-offs: ${agents.join(' | ')}`)
+  await win.click('.job-card.done .job-toggle')
+  await win.waitForSelector('.job-reply', { timeout: 5000 })
+  await sleep(300)
+  await win.screenshot({ path: path.join(shots, '28-window-handoffs.png') })
+  // Typing in the window asks Watson; the answer lands in the chat.
+  await win.click('nav button:has-text("Conversation")')
+  await win.fill('.home-ask input', 'How tall is the Eiffel Tower?')
+  await win.press('.home-ask input', 'Enter')
+  await win.waitForSelector('.bubble.watson:has-text("330 meters")', { timeout: 10_000 })
+  await win.close()
+  return `${you} requests as chat bubbles; ${agents.length} hand-offs with full answers; typed question answered`
+})
+
 await scenario('Settings window', async () => {
   const opened = app.waitForEvent('window', { timeout: 10_000 })
   await overlay.evaluate(() => window.watson.openSettings())

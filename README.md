@@ -28,6 +28,18 @@ Watson writes a log to `~/Library/Logs/Watson/watson.log` (no keys or conversati
 The GitHub Actions workflows in `.github/workflows` only run when started by hand
 (Actions → Run workflow); pushes don't trigger them.
 
+## The pill and the Watson window
+
+- The resting pill shows something useful: your next event ("MATH 112 · in 12m") and the weather,
+  a running timer, or a hand-off in progress.
+- **Click** it to talk. **Hold** it for half a second to lift it and drag it anywhere, on any screen;
+  when you let go, choose **Pill** or **Circle**, or **Reset** it to the top centre. Near an edge or
+  the bottom of the screen the panel shifts or opens upward so it's never cut off.
+- **Open Watson** (the ⤢ button in the panel, or the menu-bar icon) shows your recent requests as a
+  chat, every hand-off with its full answer, and anything waiting for your OK. It comes forward on its
+  own when something needs confirming (Settings → Agents). History stays on this Mac
+  (`history.json`); **Clear history** removes it.
+
 ## Two ways to talk
 
 | | How | What happens |

@@ -12,7 +12,10 @@ import { Store } from './store'
 import * as music from './tools/music'
 import { setExecBridge } from './tools/os'
 import { installedApps } from './tools/apps'
+import { history } from './history'
 import { getStock } from './tools/stocks'
+import { getWeather } from './tools/weather'
+import { getCalendar } from './tools/calendar'
 import { spentToday } from './usage'
 import { timerName, timers as timerStore } from './timers'
 import type { TimerItem } from '@shared/types'
@@ -28,6 +31,7 @@ const brain = new Brain()
 
 let overlay: BrowserWindow | null = null
 let settingsWin: BrowserWindow | null = null
+let homeWin: BrowserWindow | null = null
 let tray: Tray | null = null
 let quitting = false
 
@@ -79,14 +83,92 @@ function makeWindow(hash: string, opts: Electron.BrowserWindowConstructorOptions
   return win
 }
 
-function overlayBounds() {
-  const { workArea } = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
-  return {
-    x: Math.round(workArea.x + (workArea.width - OVERLAY_W) / 2),
-    y: workArea.y + 6,
-    width: OVERLAY_W,
-    height: OVERLAY_H,
+// ---------------- Where the pill sits ----------------
+
+/** Gap between the window edge and the island (matches .stage padding). */
+const EDGE = 4
+const PILL_H = 38
+
+/** The pill's anchor: the middle of its top edge, in screen points, and the display it's on. */
+function pillAnchor(): { display: Electron.Display; x: number; y: number } {
+  const place = getSettings().pillPlace
+  const saved = place ? screen.getAllDisplays().find((d) => d.id === place.displayId) : undefined
+  if (saved && place) {
+    const wa = saved.workArea
+    return { display: saved, x: wa.x + place.fx * wa.width, y: wa.y + place.fy * wa.height }
   }
+  // Default: top centre of the screen with the pointer.
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint())
+  return { display, x: display.workArea.x + display.workArea.width / 2, y: display.workArea.y + 6 + EDGE }
+}
+
+const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
+
+/**
+ * The overlay window for the current anchor. It stays on screen: near an edge the window is
+ * pushed inside and the island is offset within it; in the lower half the panel opens upward.
+ */
+function overlayPlacement(): { bounds: Electron.Rectangle; layout: { centerX: number; dir: 'down' | 'up' } } {
+  const { display, x, y } = pillAnchor()
+  const wa = display.workArea
+  const dir: 'down' | 'up' = y > wa.y + wa.height / 2 ? 'up' : 'down'
+  const wx = Math.round(clamp(x - OVERLAY_W / 2, wa.x, wa.x + wa.width - OVERLAY_W))
+  const wy = Math.round(dir === 'down' ? clamp(y - EDGE, wa.y, wa.y + wa.height - OVERLAY_H) : clamp(y + PILL_H + EDGE - OVERLAY_H, wa.y, wa.y + wa.height - OVERLAY_H))
+  return { bounds: { x: wx, y: wy, width: OVERLAY_W, height: Math.min(OVERLAY_H, wa.height) }, layout: { centerX: Math.round(x - wx), dir } }
+}
+
+function overlayBounds() {
+  return overlayPlacement().bounds
+}
+
+/** Put the overlay where the pill belongs and tell the renderer where the island sits in it. */
+function placeOverlay() {
+  const win = liveOverlay()
+  if (!win || dragging) return
+  const { bounds, layout } = overlayPlacement()
+  win.setBounds(bounds)
+  const cur = store.state.layout
+  if (cur.centerX !== layout.centerX || cur.dir !== layout.dir) store.set({ layout })
+}
+
+// Dragging: the window follows the pointer; on release the new spot is saved.
+let dragging: { cursor0: Electron.Point; win0: Electron.Point; anchor0: { x: number; y: number }; timer: NodeJS.Timeout } | null = null
+
+function startPillDrag() {
+  const win = liveOverlay()
+  if (!win || dragging) return
+  const [x, y] = win.getPosition()
+  const a = pillAnchor()
+  dragging = {
+    cursor0: screen.getCursorScreenPoint(),
+    win0: { x, y },
+    anchor0: { x: a.x, y: a.y },
+    timer: setInterval(() => {
+      if (!dragging) return
+      const c = screen.getCursorScreenPoint()
+      liveOverlay()?.setPosition(Math.round(dragging.win0.x + c.x - dragging.cursor0.x), Math.round(dragging.win0.y + c.y - dragging.cursor0.y))
+    }, 16),
+  }
+}
+
+function endPillDrag() {
+  if (!dragging) return
+  clearInterval(dragging.timer)
+  const c = screen.getCursorScreenPoint()
+  const moved = Math.hypot(c.x - dragging.cursor0.x, c.y - dragging.cursor0.y)
+  const x = dragging.anchor0.x + c.x - dragging.cursor0.x
+  const y = dragging.anchor0.y + c.y - dragging.cursor0.y
+  dragging = null
+  if (moved > 3) {
+    const display = screen.getDisplayNearestPoint({ x: Math.round(x), y: Math.round(y) })
+    const wa = display.workArea
+    const cx = clamp(x, wa.x + 24, wa.x + wa.width - 24)
+    const cy = clamp(y, wa.y + EDGE, wa.y + wa.height - PILL_H - EDGE)
+    // Dropped near the top centre: snap back to the default spot.
+    const nearHome = Math.abs(cx - (wa.x + wa.width / 2)) < 60 && cy - wa.y < 48
+    updateSettings({ pillPlace: nearHome ? null : { displayId: display.id, fx: (cx - wa.x) / wa.width, fy: (cy - wa.y) / wa.height } })
+  }
+  placeOverlay()
 }
 
 function createOverlay() {
@@ -110,6 +192,7 @@ function createOverlay() {
   overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true, skipTransformProcessType: true })
   overlay.setIgnoreMouseEvents(true, { forward: true })
   overlay.once('ready-to-show', () => {
+    store.set({ layout: overlayPlacement().layout, pillShape: getSettings().pillShape })
     overlay?.showInactive()
     pushState(store.state)
   })
@@ -142,6 +225,39 @@ function openSettings() {
   settingsWin.on('closed', () => {
     settingsWin = null
     store.set({ hasApiKey: secretStatus().anthropic })
+  })
+}
+
+/** The Watson window: recent requests as a chat, every hand-off, and anything waiting for an OK. */
+function openWindow(opts: { quiet?: boolean } = {}) {
+  if (homeWin && !homeWin.isDestroyed()) {
+    if (opts.quiet) homeWin.showInactive()
+    else {
+      homeWin.show()
+      homeWin.focus()
+      if (!INVISIBLE) app.focus({ steal: true })
+    }
+    return
+  }
+  homeWin = makeWindow('home', {
+    width: 940,
+    height: 700,
+    minWidth: 640,
+    minHeight: 480,
+    title: 'Watson',
+    titleBarStyle: 'hiddenInset',
+    backgroundColor: '#141416',
+    show: false,
+  })
+  homeWin.once('ready-to-show', () => {
+    if (INVISIBLE || opts.quiet) homeWin?.showInactive()
+    else {
+      homeWin?.show()
+      app.focus({ steal: true })
+    }
+  })
+  homeWin.on('closed', () => {
+    homeWin = null
   })
 }
 
@@ -182,6 +298,7 @@ function buildTrayMenu() {
           { label: 'Show my words to edit first (review)', type: 'radio', checked: s.inputMode === 'review', click: () => setSettings({ inputMode: 'review' }) },
         ],
       },
+      { label: 'Open Watson', click: () => openWindow() },
       { label: 'New conversation', click: () => { brain.resetConversation(); dismiss() } },
       { label: 'Remove pinned widgets', enabled: pinned.list().length > 0, click: () => { pinned.removeKind('all'); buildTrayMenu() } },
       { type: 'separator' },
@@ -203,7 +320,11 @@ function createTray() {
 }
 
 function pushState(s: UIState) {
-  liveOverlay()?.webContents.send('state', { ...s, usageTodayUsd: spentToday() })
+  const st = { ...s, usageTodayUsd: spentToday() }
+  liveOverlay()?.webContents.send('state', st)
+  if (homeWin && !homeWin.isDestroyed()) homeWin.webContents.send('state', st)
+  // Hand-offs go to history as they progress.
+  for (const j of s.jobs) history.upsertJob(j)
 }
 store.on('change', pushState)
 
@@ -221,6 +342,12 @@ function setSettings(patch: Partial<Settings>): Settings {
   if (next.hotkey !== prev.hotkey || next.reviewHotkey !== prev.reviewHotkey) registerHotkeys()
   configureHelper(next)
   syncFromSettings(next)
+  if ('pillPlace' in patch) placeOverlay()
+  if (next.pillShape !== store.state.pillShape) store.set({ pillShape: next.pillShape })
+  if (next.homeCity !== prev.homeCity || next.units !== prev.units) {
+    lastWeather = 0
+    void refreshGlance()
+  }
   buildTrayMenu()
   return next
 }
@@ -509,12 +636,15 @@ async function runTurn(text: string, mode: 'voice' | 'text') {
     if (ac.signal.aborted) return
     speaker.flush()
     store.removeActivity(thinking)
+    const shown = turnPanel as Panel | null // set by tools during the turn
+    history.addTurn({ mode, you: text, watson: reply.trim(), title: shown?.title, blocks: shown?.blocks })
   } catch (e) {
     if (ac.signal.aborted) return
     const message = e instanceof BudgetError || e instanceof Error ? e.message : String(e)
     console.error('[watson] answer failed:', message.slice(0, 300))
     store.finishActivity(thinking, 'error', 'Something went wrong')
     store.set({ error: friendlyError(message), reply: '' })
+    history.addTurn({ mode, you: text, watson: `⚠︎ ${friendlyError(message)}` })
     if (mode === 'voice') speakText(e instanceof BudgetError ? message : 'Sorry, something went wrong. The details are on screen.')
   } finally {
     if (turnAbort === ac) {
@@ -550,7 +680,7 @@ async function rememberInsertTarget() {
 function onHotkey(mode: InputMode) {
   if (store.state.ringing) return stopRinging()
   console.log(`[watson] hotkey (${mode}) while ${store.state.phase}`)
-  if (liveOverlay() && store.state.phase === 'idle') overlay!.setBounds(overlayBounds())
+  if (liveOverlay() && store.state.phase === 'idle') placeOverlay()
   switch (store.state.phase) {
     case 'idle':
       // Remember the app you were in, so dictation can be typed back into it.
@@ -638,6 +768,7 @@ let confirmSeq = 0
 function confirm(title: string, body: string, actionLabel: string): Promise<boolean> {
   const id = `c${++confirmSeq}`
   store.set({ confirm: { id, title, body, actionLabel }, expanded: true })
+  if (getSettings().openWindowOnConfirm) openWindow({ quiet: true })
   return new Promise((resolve) => {
     confirms.set(id, (ok) => {
       confirms.delete(id)
@@ -669,6 +800,39 @@ function announce(spoken: string, panel: Panel | null) {
   } else {
     announceQueue.push(spoken)
   }
+}
+
+// ---------------- Glance: what the idle pill shows ----------------
+
+let lastWeather = 0
+
+/** Next event (Calendar) and current temperature (Open-Meteo): free, local, no API calls. */
+async function refreshGlance() {
+  const glance = { ...store.state.glance }
+  if (helper.ready) {
+    try {
+      const now = Date.now()
+      const today = await getCalendar(helper, 'today')
+      const next = today.days
+        .flatMap((d) => d.events)
+        .filter((e) => !e.allDay && e.end > now && e.start < now + 3 * 3600_000)
+        .sort((a, b) => a.start - b.start)[0]
+      glance.nextEvent = next ? { title: next.title, start: next.start, end: next.end } : undefined
+    } catch {
+      glance.nextEvent = undefined // no Calendar access: just don't show it
+    }
+  }
+  if (Date.now() - lastWeather > 15 * 60_000) {
+    try {
+      const s = getSettings()
+      const w = await getWeather(s.homeCity, s.units)
+      glance.weather = { temp: Math.round(w.now.temp), code: w.now.code, isDay: w.now.isDay, unit: s.units }
+      lastWeather = Date.now()
+    } catch {
+      /* offline: keep the last reading */
+    }
+  }
+  store.set({ glance })
 }
 
 // ---------------- Timers ----------------
@@ -757,6 +921,20 @@ function registerIpc() {
     stopRinging()
     dismiss()
   })
+  ipcMain.on('ui:openWindow', () => openWindow())
+  ipcMain.handle('history:get', () => history.get())
+  ipcMain.on('history:clear', () => history.clear())
+  ipcMain.on('pill:drag', (_e, phase: string) => (phase === 'start' ? startPillDrag() : endPillDrag()))
+  ipcMain.on('pill:shape', (_e, shape: string) => {
+    const pillShape = shape === 'circle' ? 'circle' : 'pill'
+    updateSettings({ pillShape })
+    store.set({ pillShape })
+  })
+  ipcMain.on('pill:reset', () => {
+    updateSettings({ pillPlace: null })
+    placeOverlay()
+  })
+  ipcMain.on('pill:arranging', (_e, on: boolean) => store.set({ arranging: Boolean(on) }))
   ipcMain.on('timer:cancel', (_e, id: string) => timerStore.cancel(String(id)))
   ipcMain.on('timer:stopRinging', () => stopRinging())
   ipcMain.on('ui:confirm', (_e, id: string, ok: boolean) => confirms.get(id)?.(Boolean(ok)))
@@ -873,15 +1051,21 @@ app.whenReady().then(() => {
     store.set({ helperReady: false })
   })
   helper.start()
+  history.load()
+  history.on('change', (h) => {
+    if (homeWin && !homeWin.isDestroyed()) homeWin.webContents.send('history', h)
+  })
   timerStore.on('change', (list: TimerItem[]) => store.set({ timers: list }))
   timerStore.on('fire', onTimerFire)
   timerStore.restore()
   store.set({ timers: timerStore.list() })
   pinned.restore()
+  setTimeout(() => void refreshGlance(), 4000)
+  setInterval(() => void refreshGlance(), 60_000)
   const keys = secretStatus()
   store.set({ hasApiKey: keys.anthropic })
   if (!keys.anthropic) openSettings()
-  screen.on('display-metrics-changed', () => liveOverlay()?.setBounds(overlayBounds()))
+  for (const ev of ['display-metrics-changed', 'display-added', 'display-removed'] as const) screen.on(ev as 'display-added', () => placeOverlay())
 })
 
 app.on('second-instance', () => openSettings())

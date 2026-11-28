@@ -309,6 +309,9 @@ export function SettingsPage() {
         <Row label="Ask before every hand-off">
           <Toggle on={s.confirmHandoffs} onChange={(v) => save({ confirmHandoffs: v })} />
         </Row>
+        <Row label="Open the Watson window when something needs my OK" hint="Hand-offs that send, delete or buy">
+          <Toggle on={s.openWindowOnConfirm} onChange={(v) => save({ openWindowOnConfirm: v })} />
+        </Row>
         <Row label="Return to my app after sending">
           <Toggle on={s.returnFocusAfterHandoff} onChange={(v) => save({ returnFocusAfterHandoff: v })} />
         </Row>

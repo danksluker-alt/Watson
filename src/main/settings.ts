@@ -52,6 +52,9 @@ export const DEFAULT_SETTINGS: Settings = {
   returnFocusAfterHandoff: true,
   defaultAgent: 'claude',
   agents: AGENT_PRESETS,
+  pillShape: 'pill',
+  openWindowOnConfirm: true,
+  pillPlace: null,
 }
 
 const SECRET_NAMES: SecretName[] = ['anthropic', 'xai', 'spotifyClientId', 'spotifyClientSecret']

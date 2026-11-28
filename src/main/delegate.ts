@@ -63,7 +63,7 @@ export class Delegations {
     if (!agent) throw new Error(`No enabled agent called ${agentId}. Turn it on in Settings → Agents.`)
     if (!this.deps.helper.ready) throw new Error('Hand-offs need the voice helper running (npm run helper).')
 
-    const jobId = `job${++this.seq}`
+    const jobId = `job${Date.now().toString(36)}${++this.seq}`
     const needsConfirm = !opts.reviewed && (sensitive || RISKY.test(prompt) || settings.confirmHandoffs)
     const job: DelegationData = { jobId, agentId: agent.id, agent: agent.name, prompt, status: needsConfirm ? 'confirming' : 'sending' }
     this.deps.store.set({ jobs: [...this.deps.store.state.jobs.slice(-4), job] })

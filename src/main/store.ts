@@ -25,6 +25,10 @@ export class Store extends EventEmitter {
     sounds: true,
     timers: [],
     ringing: null,
+    layout: { centerX: 380, dir: 'down' },
+    pillShape: 'pill',
+    glance: {},
+    arranging: false,
   }
 
   set(patch: Partial<UIState>) {

@@ -129,6 +129,11 @@ export type Block =
 
 export type Panel = { title?: string; subtitle?: string; blocks: Block[] }
 
+/** One request and Watson's answer, for the Watson window. */
+export type HistoryTurn = { id: string; at: number; mode: 'voice' | 'text'; you: string; watson: string; title?: string; blocks?: Block[] }
+
+export type HistoryData = { turns: HistoryTurn[]; jobs: (DelegationData & { at: number })[] }
+
 /** Widgets that can be pinned to a screen. */
 export type WidgetKind = 'weather' | 'stock' | 'calendar' | 'reminders' | 'notes' | 'clock' | 'battery' | 'nowPlaying' | 'timers'
 
@@ -152,6 +157,17 @@ export type Activity = { id: string; text: string; status: 'running' | 'done' | 
 export type PendingConfirm = { id: string; title: string; body: string; actionLabel: string }
 
 export type InputMode = 'live' | 'review'
+
+export type PillShape = 'pill' | 'circle'
+
+/** Where the pill sits: a display and a point on it, as fractions of its work area (survives resolution changes). */
+export type PillPlace = { displayId: number; fx: number; fy: number }
+
+/** Where the island sits inside the overlay window, and which way the panel opens. */
+export type IslandLayout = { centerX: number; dir: 'down' | 'up' }
+
+/** Short facts for the idle pill, refreshed in the background from free local sources. */
+export type Glance = { nextEvent?: { title: string; start: number; end: number }; weather?: { temp: number; code: number; isDay: boolean; unit: 'C' | 'F' } }
 
 /** Words dictated in review mode, waiting for the user to edit and send. */
 export type Draft = { id: number; text: string }
@@ -181,6 +197,11 @@ export type UIState = {
   timers: TimerItem[]
   /** A timer or alarm that just went off and hasn't been dismissed. */
   ringing: TimerItem | null
+  layout: IslandLayout
+  pillShape: PillShape
+  glance: Glance
+  /** The user is holding/moving the pill. */
+  arranging: boolean
 }
 
 // ---------- Settings ----------
@@ -219,6 +240,11 @@ export type Settings = {
   returnFocusAfterHandoff: boolean
   defaultAgent: string
   agents: AgentTarget[]
+  pillShape: PillShape
+  /** Bring the Watson window forward when something needs the user's OK. */
+  openWindowOnConfirm: boolean
+  /** null = top centre of the screen with the pointer. */
+  pillPlace: PillPlace | null
 }
 
 export type SecretName = 'anthropic' | 'xai' | 'spotifyClientId' | 'spotifyClientSecret'
@@ -274,6 +300,14 @@ export type WatsonAPI = {
   openPrivacyPane: (pane: 'Microphone' | 'SpeechRecognition' | 'Accessibility' | 'Automation' | 'Calendars' | 'Reminders') => void
   testVoice: () => void
   installedApps: () => Promise<{ name: string; bundleId: string }[]>
+  openWindow: () => void
+  getHistory: () => Promise<HistoryData>
+  onHistory: (cb: (h: HistoryData) => void) => () => void
+  clearHistory: () => void
+  pillDrag: (phase: 'start' | 'end') => void
+  setPillShape: (shape: PillShape) => void
+  resetPillPlace: () => void
+  setArranging: (on: boolean) => void
   cancelTimer: (id: string) => void
   stopRinging: () => void
 }

@@ -48,6 +48,18 @@ const api: WatsonAPI = {
   openPrivacyPane: (pane) => ipcRenderer.send('helper:openPrivacy', pane),
   testVoice: () => ipcRenderer.send('ui:testVoice'),
   installedApps: () => ipcRenderer.invoke('apps:installed'),
+  openWindow: () => ipcRenderer.send('ui:openWindow'),
+  getHistory: () => ipcRenderer.invoke('history:get'),
+  onHistory: (cb) => {
+    const h = (_: unknown, d: Parameters<typeof cb>[0]) => cb(d)
+    ipcRenderer.on('history', h)
+    return () => ipcRenderer.removeListener('history', h)
+  },
+  clearHistory: () => ipcRenderer.send('history:clear'),
+  pillDrag: (phase) => ipcRenderer.send('pill:drag', phase),
+  setPillShape: (shape) => ipcRenderer.send('pill:shape', shape),
+  resetPillPlace: () => ipcRenderer.send('pill:reset'),
+  setArranging: (on) => ipcRenderer.send('pill:arranging', on),
   cancelTimer: (id) => ipcRenderer.send('timer:cancel', id),
   stopRinging: () => ipcRenderer.send('timer:stopRinging'),
 }

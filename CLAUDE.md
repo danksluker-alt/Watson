@@ -50,3 +50,10 @@
   replied" or repeated), times and date separators. Fixture: `tests/fixtures/grok-bot-ready.json`.
 - e2e sets `WATSON_INVISIBLE=1`: test windows are transparent and unfocusable, so test runs don't
   flash the purple test wallpaper on the owner's screen.
+- Pill placement: `pillPlace` (display id + fractions of its work area) and `pillShape` in settings;
+  `overlayPlacement()` keeps the 760×720 overlay on screen and tells the renderer the island's centre
+  and whether the panel opens up or down (`UIState.layout`). Hold-to-move: renderer `useHoldToMove`
+  → `pill:drag` start/end; main follows the cursor and saves the spot.
+- Glance (`refreshGlance`): next event from Calendar each minute, weather every 15 min; no API calls.
+- Watson window (`#home`, `Home.tsx`): history from `src/main/history.ts` (history.json, capped),
+  live state, hand-offs, and the pending confirmation. Opens on confirmations if `openWindowOnConfirm`.

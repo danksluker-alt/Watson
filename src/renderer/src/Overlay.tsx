@@ -11,6 +11,7 @@ import { play } from './sounds'
 import { Blocks } from './widgets/Blocks'
 import { AgentMark } from './widgets/Delegation'
 import { countdown, RingingCard } from './widgets/Timers'
+import { pillWidth, useGlance, useHoldToMove } from './pill'
 
 const SPRING = { type: 'spring' as const, stiffness: 420, damping: 34, mass: 0.9 }
 const WIDTH = { pill: 168, compact: 500, panel: 680 }
@@ -202,10 +203,13 @@ export function Overlay() {
   }, [])
   useSounds(s)
   const nextTimer = useNextTimer(s)
+  const glance = useGlance(s?.glance ?? {})
+  const hold = useHoldToMove(() => window.watson.toggleListen())
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         setTyping(false)
+        window.watson.setArranging(false)
         window.watson.dismiss()
       }
     }
@@ -223,7 +227,13 @@ export function Overlay() {
   const jobs = s.jobs.filter((j) => !['done', 'failed'].includes(j.status))
   const reviewing = Boolean(s.draft) || (s.capture === 'review' && s.phase === 'listening' && Boolean(s.transcript))
   const hasPanel = reviewing || Boolean(s.panel || s.confirm || s.error || s.notice || s.ringing || typing || (s.expanded && s.reply))
-  const mode: Mode = hasPanel ? 'panel' : s.phase !== 'idle' ? 'compact' : 'pill'
+  const mode: Mode = s.arranging ? 'pill' : hasPanel ? 'panel' : s.phase !== 'idle' ? 'compact' : 'pill'
+  const circle = mode === 'pill' && s.pillShape === 'circle'
+  const pillText = jobs.length ? `${jobs[0].agent}${jobs.length > 1 ? ` +${jobs.length - 1}` : ''}` : nextTimer ?? (hover && !s.arranging ? '⌥ Space' : glance?.text ?? 'Watson')
+  const width = mode === 'pill' ? (circle ? 38 : pillWidth(pillText) + (jobs.length ? 18 : 0)) : WIDTH[mode]
+  // Keep the island inside the window: near a screen edge it shifts instead of being cut off.
+  const left = Math.max(8, Math.min(760 - width - 8, s.layout.centerX - width / 2))
+  const up = s.layout.dir === 'up'
 
   const enter = () => {
     setHover(true)
@@ -249,43 +259,60 @@ export function Overlay() {
   return (
     <div className="stage">
       <motion.div
-        className="island"
+        className={`island${hold.holding ? ' lifted' : ''}${circle ? ' circle' : ''}`}
         data-mode={mode}
         data-phase={s.phase}
         onMouseEnter={enter}
         onMouseLeave={leave}
         initial={false}
-        animate={{ width: WIDTH[mode], height: contentH || 38, borderRadius: mode === 'pill' ? 19 : mode === 'compact' ? 31 : 28 }}
-        whileHover={mode === 'pill' ? { scale: 1.04 } : undefined}
+        style={up ? { bottom: 4, top: 'auto', transformOrigin: '50% 100%' } : { top: 4, bottom: 'auto', transformOrigin: '50% 0%' }}
+        animate={{ left, width, height: circle ? 38 : contentH || 38, borderRadius: mode === 'pill' ? 19 : mode === 'compact' ? 31 : 28, scale: hold.holding ? 1.08 : 1 }}
+        whileHover={mode === 'pill' && !hold.holding ? { scale: 1.04 } : undefined}
         transition={SPRING}
       >
-        <div ref={contentRef} className="island-content" style={{ width: WIDTH[mode] }}>
+        <div ref={contentRef} className="island-content" style={{ width }}>
           <AnimatePresence mode="popLayout" initial={false}>
             {mode === 'pill' && (
               <motion.button
                 key="pill"
                 className="pill"
-                onClick={() => window.watson.toggleListen()}
+                {...hold.handlers}
+                onContextMenu={(e) => {
+                  e.preventDefault()
+                  window.watson.setArranging(true)
+                }}
                 initial={{ opacity: 0, filter: 'blur(6px)' }}
                 animate={{ opacity: 1, filter: 'blur(0px)' }}
                 exit={{ opacity: 0, filter: 'blur(6px)' }}
                 transition={{ duration: 0.18 }}
-                title="Talk to Watson (⌥ Space)"
+                title="Click to talk · hold to move"
               >
-                <Orb phase="idle" size={18} />
-                {jobs.length > 0 ? (
+                <Orb phase="idle" size={circle ? 22 : 18} />
+                {circle ? (
+                  (nextTimer || jobs.length > 0) && <span className="circle-badge" />
+                ) : jobs.length > 0 ? (
                   <span className="pill-job">
                     <span className="spinner" />
-                    {jobs[0].agent}
-                    {jobs.length > 1 && ` +${jobs.length - 1}`}
+                    {pillText}
                   </span>
-                ) : nextTimer && !hover ? (
+                ) : nextTimer ? (
                   <span className="pill-timer">
                     <span className="pill-timer-dot" />
                     {nextTimer}
                   </span>
                 ) : (
-                  <span className="pill-label">{hover ? '⌥ Space' : 'Watson'}</span>
+                  <AnimatePresence mode="popLayout" initial={false}>
+                    <motion.span
+                      key={pillText}
+                      className={`pill-label${glance && pillText === glance.text ? ` glance ${glance.tone}` : ''}`}
+                      initial={{ opacity: 0, y: up ? -8 : 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: up ? 8 : -8 }}
+                      transition={{ duration: 0.28 }}
+                    >
+                      {pillText}
+                    </motion.span>
+                  </AnimatePresence>
                 )}
               </motion.button>
             )}
@@ -367,6 +394,11 @@ export function Overlay() {
                         {typing ? <Mic size={16} /> : <Keyboard size={16} />}
                       </button>
                     )}
+                    <button className="icon-btn" onClick={() => window.watson.openWindow()} aria-label="Open the Watson window" title="Open the Watson window">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7" />
+                      </svg>
+                    </button>
                     <button className="icon-btn" onClick={() => window.watson.openSettings()} aria-label="Settings">
                       <Gear size={16} />
                     </button>
@@ -494,6 +526,35 @@ export function Overlay() {
           </AnimatePresence>
         </div>
       </motion.div>
+      <AnimatePresence>
+        {s.arranging && !hold.holding && (
+          <motion.div
+            className="arrange-bar"
+            style={{ left: Math.max(8, Math.min(760 - 300 - 8, s.layout.centerX - 150)), ...(up ? { bottom: 52 } : { top: 52 }) }}
+            initial={{ opacity: 0, y: up ? 6 : -6, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.96 }}
+            transition={SPRING}
+            onMouseEnter={enter}
+            onMouseLeave={leave}
+          >
+            <div className="segmented-dark">
+              <button className={s.pillShape === 'pill' ? 'on' : ''} onClick={() => window.watson.setPillShape('pill')}>
+                Pill
+              </button>
+              <button className={s.pillShape === 'circle' ? 'on' : ''} onClick={() => window.watson.setPillShape('circle')}>
+                Circle
+              </button>
+            </div>
+            <button className="arrange-link" onClick={() => window.watson.resetPillPlace()}>
+              Reset
+            </button>
+            <button className="arrange-done" onClick={() => window.watson.setArranging(false)}>
+              Done
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   )
 }
