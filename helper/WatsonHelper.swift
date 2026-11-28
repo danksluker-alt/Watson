@@ -79,6 +79,8 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     var locale = "en-US"
     /// Names the recognizer should expect (the user's AI apps), sent by `configure`.
     var vocabulary: [String] = []
+    /// "male", "female" or "" (any): which kind of voice "Best available" prefers.
+    var gender = ""
     var recognizer: SFSpeechRecognizer?
     let request = Locked<SFSpeechAudioBufferRecognitionRequest?>(nil)
     var task: SFSpeechRecognitionTask?
@@ -95,6 +97,13 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     var wakeMode = false
     let wakeOnly = Locked<Bool>(false)
     var wakeTimer: Timer?
+    /// When the mic last delivered audio (audio thread writes, main thread reads).
+    let lastBufferAt = Locked<Double>(0)
+    var micWatchdog: Timer?
+    var wakeWanted = false
+    var wakeStarts: [Date] = []
+    var micStartedAt = Date.distantPast
+    var micRestarts: [Date] = []
     // Barge-in: the audio thread notices the user's voice while Watson talks and ducks the voice
     // at once; the first real word then stops it. Only with echo cancellation (otherwise the mic
     // hears Watson itself).
@@ -124,12 +133,11 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         if let configObserver { NotificationCenter.default.removeObserver(configObserver) }
         configObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main) { [weak self] _ in
             guard let self else { return }
+            // Turning on echo cancellation itself reports a change right after we start: if audio
+            // keeps flowing, there's nothing to do (the watchdog checks). Real changes later rebuild.
+            if Date().timeIntervalSince(self.micStartedAt) < 1.5 { return }
             log("Audio input changed; restarting the microphone.")
-            self.engineRunning = false
-            self.engine.inputNode.removeTap(onBus: 0)
-            if self.listening {
-                do { try self.ensureEngine() } catch { emit(["ev": "error", "message": error.localizedDescription]) }
-            }
+            DispatchQueue.main.async { self.restartMic() }
         }
         if outConfigObserver == nil {
             outConfigObserver = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: outEngine, queue: .main) { [weak self] _ in
@@ -140,6 +148,41 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
                     do { try self.ensureOutput() } catch { emit(["ev": "error", "message": error.localizedDescription]) }
                 }
             }
+        }
+    }
+
+    /// Rebuild the mic engine and, if we're listening, start it again. The recognition request
+    /// keeps going: it's fed by whatever engine is running.
+    func restartMic() {
+        let now = Date()
+        micRestarts = micRestarts.filter { now.timeIntervalSince($0) < 10 } + [now]
+        if micRestarts.count > 3 {
+            log("The microphone keeps failing; stopping.")
+            endRecognition(cancel: true)
+            emit(["ev": "error", "message": "The microphone keeps dropping out. Check the input in System Settings → Sound."])
+            return
+        }
+        lastBufferAt.set(Date().timeIntervalSince1970)
+        rebuildEngine()
+        guard listening else { return }
+        do { try ensureEngine() } catch { emit(["ev": "error", "message": error.localizedDescription]) }
+    }
+
+    /// While listening, the mic must keep delivering audio. If it goes quiet for over a second
+    /// (a device change can do that), rebuild it rather than listen to nothing.
+    func checkMicAlive() {
+        guard listening, engineRunning else { return }
+        let gap = Date().timeIntervalSince1970 - lastBufferAt.get()
+        if gap > 1.2 {
+            // Seen on an M1 with macOS 27: the echo-cancelling mic starts fine but delivers no audio
+            // at all. Fall back to the plain mic, as when echo cancellation fails to start.
+            if engine.inputNode.isVoiceProcessingEnabled && !voiceProcessingFailed {
+                log("The echo-cancelling microphone delivered no audio for \(String(format: "%.1f", gap)) s; using the plain microphone.")
+                voiceProcessingFailed = true
+            } else {
+                log("The microphone stopped delivering audio for \(String(format: "%.1f", gap)) s; restarting it.")
+            }
+            restartMic()
         }
     }
 
@@ -255,6 +298,8 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
             throw error
         }
         engineRunning = true
+        micStartedAt = Date()
+        lastBufferAt.set(Date().timeIntervalSince1970)
         log("Microphone started: \(Int(inFormat.sampleRate)) Hz, \(inFormat.channelCount) ch, echo cancellation \(input.isVoiceProcessingEnabled ? "on" : "off")")
     }
 
@@ -273,6 +318,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
 
     // Audio thread.
     func handleInput(_ buffer: AVAudioPCMBuffer) {
+        lastBufferAt.set(Date().timeIntervalSince1970)
         guard isListening.get() else { return }
         if let ch = buffer.floatChannelData?[0] {
             let n = Int(buffer.frameLength)
@@ -352,6 +398,9 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         }
         listening = true
         isListening.set(true)
+        lastBufferAt.set(Date().timeIntervalSince1970)
+        micWatchdog?.invalidate()
+        micWatchdog = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.checkMicAlive() }
         wakeMode = wake
         wakeOnly.set(wake)
         endpointTimer?.invalidate()
@@ -366,7 +415,16 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     }
 
     func startWake() {
+        wakeWanted = true
         if listening { return } // a real listen (or the wake session itself) is already running
+        // A recognizer that fails at once would otherwise restart every 0.3 s forever.
+        let now = Date()
+        wakeStarts = wakeStarts.filter { now.timeIntervalSince($0) < 20 } + [now]
+        if wakeStarts.count > 8 {
+            wakeWanted = false
+            log("“Hey Watson” keeps failing to start; pausing it.")
+            return
+        }
         do { try startListening(silence: nil, wake: true) } catch {
             emit(["ev": "error", "message": error.localizedDescription])
         }
@@ -375,7 +433,10 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     func restartWake(_ sid: Int) {
         guard sid == session, wakeMode else { return }
         endRecognition(cancel: true)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.startWake() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+            guard let self, self.wakeWanted else { return } // turned off in the meantime
+            self.startWake()
+        }
     }
 
     static let wakePhrase = try! NSRegularExpression(pattern: "\\b(hey|hi|okay|ok|hello)[ ,]+watson\\b", options: [.caseInsensitive])
@@ -426,8 +487,9 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
             emit(["ev": "partial", "text": text, "session": sid])
         }
         if isFinal || error != nil {
-            if !lastText.isEmpty { finish(sid) } else if error != nil && !isSpeaking {
-                // "No speech detected" and friends. Keep listening only if we were asked to.
+            if !lastText.isEmpty { finish(sid) } else if error != nil {
+                // "No speech detected" and friends. While Watson talks this also ends the talk-over
+                // listen; the app starts a fresh one afterwards instead of keeping a dead session.
                 endRecognition(cancel: true)
                 emit(["ev": "nospeech", "session": sid])
             }
@@ -470,6 +532,8 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         endpointTimer = nil
         wakeTimer?.invalidate()
         wakeTimer = nil
+        micWatchdog?.invalidate()
+        micWatchdog = nil
         wakeMode = false
         wakeOnly.set(false)
         if let req = request.get() { req.endAudio() }
@@ -489,13 +553,33 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
 
     // MARK: Speaking
 
+    /// How human a voice sounds: Siri's natural voices, then Premium, then Enhanced. Novelty and
+    /// old robotic voices only if nothing else exists.
+    static func naturalness(_ v: AVSpeechSynthesisVoice) -> Int {
+        let id = v.identifier
+        if id.contains("speech.synthesis.voice") || id.contains("eloquence") { return 0 }
+        if id.contains("siri") { return 10 }
+        switch v.quality {
+        case .premium: return 8
+        case .enhanced: return 6
+        default: return id.contains("super-compact") ? 1 : 2
+        }
+    }
+
     func selectedVoice() -> AVSpeechSynthesisVoice? {
         if let voiceId, let v = AVSpeechSynthesisVoice(identifier: voiceId) { return v }
         let lang = String(locale.prefix(2))
         let candidates = AVSpeechSynthesisVoice.speechVoices().filter { $0.language.hasPrefix(lang) }
         let regional = candidates.filter { $0.language == locale.replacingOccurrences(of: "_", with: "-") }
         let pool = regional.isEmpty ? candidates : regional
-        return pool.max { $0.quality.rawValue < $1.quality.rawValue }
+        let best = { (vs: [AVSpeechSynthesisVoice]) in vs.max { Voice.naturalness($0) < Voice.naturalness($1) } }
+        // The preferred gender wins if it has a natural-sounding voice; otherwise the most natural voice.
+        let wanted: AVSpeechSynthesisVoiceGender? = gender == "male" ? .male : gender == "female" ? .female : nil
+        if let wanted {
+            let match = pool.filter { $0.gender == wanted } + (regional.isEmpty ? [] : candidates.filter { $0.gender == wanted && !regional.contains($0) })
+            if let v = best(match), Voice.naturalness(v) >= 6 { return v }
+        }
+        return best(pool)
     }
 
     func speak(id: String, text: String) {
@@ -509,6 +593,10 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         do { try ensureOutput() } catch {
             emit(["ev": "error", "message": "Watson couldn't play its voice: \(error.localizedDescription)"])
             queue.removeAll()
+            // Still say we're done, or the app waits for speech that will never finish.
+            pending = 0
+            speakingNow.set(false)
+            emit(["ev": "speak.idle"])
             return
         }
         if outEngine.isRunning && !player.isPlaying { player.play() }
@@ -609,7 +697,9 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
             case .enhanced: quality = "enhanced"
             default: quality = "default"
             }
-            return ["id": v.identifier, "name": v.name, "language": v.language, "quality": quality]
+            let gender = v.gender == .male ? "male" : v.gender == .female ? "female" : ""
+            let name = v.identifier.contains("siri") ? "Siri \(v.name)" : v.name
+            return ["id": v.identifier, "name": name, "language": v.language, "quality": v.identifier.contains("siri") ? "siri" : quality, "gender": gender]
         }
     }
 }
@@ -1297,6 +1387,7 @@ func handle(_ msg: [String: Any]) {
         if let r = msg["rate"] as? Double { voice.rate = Float(r) }
         if let e = msg["echoCancellation"] as? Bool { voice.echoCancellation = e }
         if let v = msg["vocabulary"] as? [String] { voice.vocabulary = v.filter { !$0.isEmpty } }
+        if let g = msg["voiceGender"] as? String { voice.gender = g }
         reply(id)
     case "listen.start":
         do { try voice.startListening(silence: msg["silence"] as? Double); reply(id) }
@@ -1311,6 +1402,7 @@ func handle(_ msg: [String: Any]) {
         voice.startWake()
         reply(id)
     case "wake.stop":
+        voice.wakeWanted = false
         if voice.wakeMode { voice.endRecognition(cancel: true) }
         reply(id)
     case "speak":

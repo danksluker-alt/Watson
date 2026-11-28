@@ -94,3 +94,12 @@
 - `tucked`: true while the dashboard window has focus (and on `openWindow`); the overlay stays a pill when
   idle. Opening the dashboard ends live talk. The hotkey clears `tucked`.
 - `ax.send` gives an app that wasn't running more time to launch (30 s to come forward, 15 s for its box).
+- Voice: `voiceGender` (male/female/any) is sent to the helper; `selectedVoice()` ranks by `naturalness`
+  (Siri natural voices > Premium > Enhanced > compact; novelty/eloquence voices last) and takes the wanted
+  gender only if it has an Enhanced-or-better voice. Settings has "Get more voices" (Spoken Content pane).
+- Mic watchdog: while listening, no audio buffers for 1.2 s rebuilds the engine (`restartMic`, max 3 per
+  10 s). Config-change notifications within 1.5 s of our own start are ignored (echo cancellation causes
+  one). After a change, the engine is rebuilt, not reused (reuse once left recognition deaf for a minute).
+- Confirmations queue (`confirmQueue`); Esc declines all. Queued announcements carry their panel and show
+  it when read. `ui:cancel`, helper exit, and voice-output failure all end in idle (never stuck thinking).
+  `syncWake` also runs after dismiss, stopped speech, confirm answers and agent drafts.

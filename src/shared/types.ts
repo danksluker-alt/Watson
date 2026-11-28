@@ -256,6 +256,8 @@ export type Settings = {
   inputMode: InputMode
   /** Listen on this Mac for "Hey Watson" to start a live conversation. Off unless chosen. */
   wakeWord: boolean
+  /** Which kind of voice "Best available" prefers. */
+  voiceGender: 'male' | 'female' | 'any'
   sounds: boolean
   musicApp: MusicApp
   browserBundleId: string
@@ -293,7 +295,7 @@ export type PermissionStatus = {
   reminders?: string
 }
 
-export type VoiceInfo = { id: string; name: string; language: string; quality: string }
+export type VoiceInfo = { id: string; name: string; language: string; quality: string; gender?: string }
 
 export type RunningApp = { name: string; bundleId: string }
 
@@ -312,6 +314,8 @@ export type WatsonAPI = {
   pillMenu: () => void
   /** Answer a question an AI asked: sent to that AI in the same conversation. */
   replyToAgent: (agentId: string, text: string) => void
+  /** Opens System Settings where natural voices are downloaded. */
+  openVoiceSettings: () => void
   ask: (text: string) => void
   cancel: () => void
   dismiss: () => void

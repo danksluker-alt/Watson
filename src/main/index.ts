@@ -1,6 +1,6 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, Menu, nativeImage, Notification, screen, shell, Tray } from 'electron'
 import path from 'node:path'
-import type { Block, InputMode, MusicApp, Panel, PermissionStatus, RunningApp, SecretName, Settings, StockRange, UIState, VoiceInfo } from '@shared/types'
+import type { Block, InputMode, MusicApp, Panel, PendingConfirm, PermissionStatus, RunningApp, SecretName, Settings, StockRange, UIState, VoiceInfo } from '@shared/types'
 import { Brain, BudgetError, isSilent, SILENT, type ToolHost } from './brain'
 import { Delegations, joinNames } from './delegate'
 import { Helper, type HelperEvent } from './helper'
@@ -397,7 +397,8 @@ let speakSeq = 0
 let draftSeq = 0
 let turnPanel: Panel | null = null
 let hovered = false
-const announceQueue: string[] = []
+/** AI answers (and timer notices) waiting to be read; their panel shows when they're read. */
+const announceQueue: { spoken: string; panel: Panel | null }[] = []
 const timers: Record<'noSpeech' | 'followUp' | 'collapse', NodeJS.Timeout | null> = { noSpeech: null, followUp: null, collapse: null }
 
 function clearTimer(name: keyof typeof timers) {
@@ -463,8 +464,8 @@ function goIdle() {
   const next = !store.state.draft && helper.ready ? announceQueue.shift() : undefined
   if (next) {
     inputMode = 'voice'
-    store.set({ phase: 'thinking', reply: next })
-    speakText(next)
+    store.set({ phase: 'thinking', reply: next.spoken, ...(next.panel ? { panel: next.panel, expanded: true } : {}) })
+    speakText(next.spoken)
     return
   }
   syncWake()
@@ -490,8 +491,8 @@ function afterSpeech() {
   if (responding) return
   const next = announceQueue.shift()
   if (next) {
-    store.set({ phase: 'thinking', reply: next })
-    speakText(next)
+    store.set({ phase: 'thinking', reply: next.spoken, ...(next.panel ? { panel: next.panel, expanded: true } : {}) })
+    speakText(next.spoken)
     return
   }
   if (inputMode !== 'voice') return goIdle()
@@ -571,6 +572,7 @@ function onHelperEvent(e: HelperEvent) {
       console.log(`[watson] finished speaking${e.stopped ? ' (stopped)' : ''}`)
       speakingActive = false
       if (!e.stopped) afterSpeech()
+      else if (store.state.phase === 'idle') syncWake()
       break
     case 'error':
       console.error('[helper] error:', e.message)
@@ -684,7 +686,7 @@ async function runTurn(text: string, mode: 'voice' | 'text', unprompted = false)
         reply += d
         if (held) {
           const t = reply.trimStart()
-          if (t.length < 9 && SILENT.startsWith(t.toLowerCase())) return // could still be SILENT
+          if (t.length < 9 && (SILENT.startsWith(t.toLowerCase()) || 'silent'.startsWith(t.toLowerCase()))) return // could still be SILENT
           held = false
           d = reply
         }
@@ -799,6 +801,8 @@ function dismiss() {
   if (listening) helper.send('listen.cancel')
   listening = false
   announceQueue.length = 0
+  // Esc declines everything waiting for an OK, not just the one on screen.
+  for (const c of [...confirmQueue]) confirms.get(c.id)?.(false)
   const pending = store.state.confirm
   if (pending) confirms.get(pending.id)?.(false)
   clearTimer('noSpeech')
@@ -815,6 +819,7 @@ function dismiss() {
     draft: null,
     capture: getSettings().inputMode,
   })
+  syncWake()
 }
 
 /** The user edited their dictated words and chose where they go. */
@@ -845,6 +850,7 @@ async function submitDraft(text: string, target: string) {
   try {
     const { job } = await delegations.start(target, t, false, { reviewed: true, newChat: true })
     store.set({ transcript: t, reply: '', panel: { title: `Sent to ${job.agent}`, blocks: [{ type: 'delegation', data: job }] }, expanded: true, phase: 'idle' })
+    syncWake()
     armCollapse()
   } catch (e) {
     store.set({ error: e instanceof Error ? e.message : String(e), draft: { id: ++draftSeq, text: t } })
@@ -856,24 +862,34 @@ async function submitDraft(text: string, target: string) {
 const confirms = new Map<string, (ok: boolean) => void>()
 let confirmSeq = 0
 
+/** Confirmations wait their turn: one is shown at a time, the next appears when it's answered. */
+const confirmQueue: PendingConfirm[] = []
+
 function confirm(title: string, body: string, actionLabel: string): Promise<boolean> {
   const id = `c${++confirmSeq}`
-  store.set({ confirm: { id, title, body, actionLabel }, expanded: true })
+  const item: PendingConfirm = { id, title, body, actionLabel }
+  if (store.state.confirm) confirmQueue.push(item)
+  else store.set({ confirm: item, expanded: true })
   if (getSettings().openWindowOnConfirm) openWindow({ quiet: true })
   return new Promise((resolve) => {
     confirms.set(id, (ok) => {
       confirms.delete(id)
-      if (store.state.confirm?.id === id) store.set({ confirm: null })
+      const queued = confirmQueue.findIndex((c) => c.id === id)
+      if (queued >= 0) confirmQueue.splice(queued, 1)
+      if (store.state.confirm?.id === id) {
+        const next = confirmQueue.shift() ?? null
+        store.set({ confirm: next, ...(next ? { expanded: true } : {}) })
+      }
       resolve(ok)
+      if (!store.state.confirm) setTimeout(syncWake, 0)
     })
   })
 }
 
 function announce(spoken: string, panel: Panel | null) {
-  if (panel) store.set({ panel, expanded: true })
   armCollapse()
   if (!helper.ready) {
-    store.set({ notice: spoken })
+    store.set({ notice: spoken, ...(panel ? { panel, expanded: true } : {}) })
     return
   }
   // Waiting quietly for a follow-up counts as free: stop listening and speak now.
@@ -886,10 +902,11 @@ function announce(spoken: string, panel: Panel | null) {
   }
   if ((store.state.phase === 'idle' || quietFollowUp) && !store.state.draft) {
     inputMode = 'voice'
-    store.set({ phase: 'thinking', reply: spoken })
+    store.set({ phase: 'thinking', reply: spoken, ...(panel ? { panel, expanded: true } : {}) })
     speakText(spoken)
   } else {
-    announceQueue.push(spoken)
+    // Busy: read it (and show its panel) when the current answer is done, not over it.
+    announceQueue.push({ spoken, panel })
   }
 }
 
@@ -963,7 +980,7 @@ function previousAnswer(): { from: string; text: string } | undefined {
 
 function configureHelper(s: Settings) {
   const vocabulary = [...new Set(s.agents.filter((a) => a.enabled).flatMap((a) => [a.name, a.name.split(/[\s(]/)[0]]))]
-  helper.send('configure', { locale: s.speechLocale, voiceId: s.voiceId, rate: s.speechRate, echoCancellation: s.echoCancellation, vocabulary })
+  helper.send('configure', { locale: s.speechLocale, voiceId: s.voiceId, rate: s.speechRate, echoCancellation: s.echoCancellation, vocabulary, voiceGender: s.voiceGender === 'any' ? '' : s.voiceGender })
 }
 
 async function maybeRequestPermissions() {
@@ -1010,8 +1027,10 @@ function registerIpc() {
   })
   ipcMain.on('ui:cancel', () => {
     turnAbort?.abort()
+    responding = false
     helper.send('speak.stop')
     stopListening(true)
+    if (store.state.phase !== 'idle') goIdle() // a cancelled answer must not leave Watson "thinking"
   })
   ipcMain.on('ui:dismiss', () => {
     stopRinging()
@@ -1070,6 +1089,8 @@ function registerIpc() {
   ipcMain.on('timer:stopRinging', () => stopRinging())
   ipcMain.on('ui:confirm', (_e, id: string, ok: boolean) => confirms.get(id)?.(Boolean(ok)))
   ipcMain.on('ui:openSettings', () => openSettings())
+  // Accessibility → Spoken Content, where Siri and Premium voices are downloaded (free).
+  ipcMain.on('ui:openVoiceSettings', () => void shell.openExternal('x-apple.systempreferences:com.apple.Accessibility-Settings.extension?SpokenContent'))
   ipcMain.on('ui:openExternal', (_e, url: string) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url)
   })
@@ -1080,7 +1101,8 @@ function registerIpc() {
   ipcMain.on('ui:dictate', (_e, text: string) => {
     // Keep the user's edits, then listen for more words to add.
     store.set({ draft: { id: store.state.draft?.id ?? ++draftSeq, text: String(text ?? '') }, capture: 'review' })
-    if (store.state.phase === 'listening') return stopListening(false)
+    // "Done" with no new words: stop listening now (no words are coming back from the mic).
+    if (store.state.phase === 'listening') return stopListening(!store.state.transcript)
     startListening('fresh')
   })
   ipcMain.on('ui:submitDraft', (_e, text: string, target: string) => {
@@ -1097,9 +1119,13 @@ function registerIpc() {
   ipcMain.on('ui:pin', async (_e, block: Block) => {
     const p = paramsOf(block)
     if (!p) return
-    await pinned.add(p.kind, p.params, 'this')
-    buildTrayMenu()
-    store.set({ notice: null })
+    try {
+      await pinned.add(p.kind, p.params, 'this')
+      buildTrayMenu()
+      store.set({ notice: null })
+    } catch (e) {
+      store.set({ error: `Couldn't pin it: ${e instanceof Error ? e.message : String(e)}`, expanded: true })
+    }
   })
   ipcMain.on('widget:ready', (_e, id: string) => pinned.ready(id))
   ipcMain.on('widget:size', (_e, id: string, _w: number, h: number) => pinned.resize(id, h))
@@ -1182,7 +1208,13 @@ app.whenReady().then(() => {
   helper.on('exit', (code) => {
     if (quitting) return
     console.warn('[watson] helper exited with code', code)
+    // Whatever it was doing is gone: don't stay "listening" or "speaking" waiting for it.
+    listening = false
+    speakingActive = false
+    turnAbort?.abort()
+    responding = false
     store.set({ helperReady: false })
+    if (store.state.phase !== 'idle') goIdle()
   })
   helper.start()
   history.load()

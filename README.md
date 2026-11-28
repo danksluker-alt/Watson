@@ -85,6 +85,10 @@ and macOS shows the orange microphone dot while Watson is idle.
 Right-click the circle for: dictate, talk live, **Open dashboard**, move or change shape, "Hey Watson",
 and Settings.
 
+**Voice:** Settings → Voice → **Male / Female**. Watson uses the most natural voice of that kind on your
+Mac: Siri's voices first, then Premium and Enhanced ones. **Get more voices** opens System Settings →
+Accessibility → Spoken Content, where they're a free download.
+
 ## How it's built
 
 | Part | What it does |

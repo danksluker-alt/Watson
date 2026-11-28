@@ -189,6 +189,7 @@ export class Delegations {
 
   private async runOne(jobId: string, agent: AgentTarget, prompt: string, needsConfirm: boolean, newChat: boolean) {
     const { store } = this.deps
+    let read: string | null = null
     try {
       if (needsConfirm) {
         const ok = await this.deps.confirm(`Send this to ${agent.name}?`, prompt, 'Send')
@@ -198,9 +199,10 @@ export class Delegations {
         }
       }
       const reply = await this.handOff(jobId, agent, prompt, newChat)
-      const read = store.activity(`Reading ${agent.name}'s answer`)
+      read = store.activity(`Reading ${agent.name}'s answer`)
       const { spoken, panel } = await this.deps.summarize(agent.name, prompt, reply)
       store.finishActivity(read, 'done')
+      read = null
       this.update(jobId, { status: 'done', summary: spoken })
       const job = this.job(jobId)
       // Options to tap go back to this agent, in the same conversation.
@@ -210,6 +212,7 @@ export class Delegations {
       this.deps.answered({ agent: agent.name, prompt, reply, spoken, panel: shown })
       this.deps.announce(`${agent.name} answered. ${spoken}`, shown)
     } catch (e) {
+      if (read) store.finishActivity(read, 'error')
       const message = e instanceof Error ? e.message : String(e)
       this.update(jobId, { status: 'failed', error: message })
       this.deps.announce(`The hand-off to ${agent.name} didn't work. ${message}`, null)
@@ -240,17 +243,19 @@ export class Delegations {
     const answered = results.filter((r): r is NonNullable<typeof r> => Boolean(r?.reply.trim()))
     const failed = agents.filter((a) => !answered.some((r) => r.agent === a.name)).map((a) => a.name)
     const missing = failed.length ? ` ${joinNames(failed)} didn't answer.` : ''
+    let read: string | null = null
     try {
       if (!answered.length) {
         this.deps.announce(`None of ${names} answered.${failed.length ? ' Check that the apps are open and signed in.' : ''}`, null)
         return
       }
-      const read = store.activity(answered.length > 1 ? `Comparing ${joinNames(answered.map((r) => r.agent))}` : `Reading ${answered[0].agent}'s answer`)
+      read = store.activity(answered.length > 1 ? `Comparing ${joinNames(answered.map((r) => r.agent))}` : `Reading ${answered[0].agent}'s answer`)
       const { spoken, takeaways } =
         answered.length > 1
           ? await this.deps.compare(shownPrompt, answered.map(({ agent, reply }) => ({ agent, reply })))
           : await this.deps.summarize(answered[0].agent, shownPrompt, answered[0].reply).then((r) => ({ spoken: r.spoken, takeaways: [{ agent: answered[0].agent, text: r.spoken }] }))
       store.finishActivity(read, 'done')
+      read = null
       for (const r of answered) this.update(r.jobId, { status: 'done', summary: takeaways.find((t) => t.agent === r.agent)?.text })
       const data: CompareData = {
         groupId,
@@ -264,6 +269,7 @@ export class Delegations {
       this.deps.answered({ agent: joinNames(answered.map((r) => r.agent)), prompt: shownPrompt, reply: answered.map((r) => `${r.agent}: ${r.reply.slice(0, 700)}`).join('\n\n'), spoken, panel })
       this.deps.announce(`${spoken}${missing}`, { title: `${joinNames(answered.map((r) => r.agent))} compared`, subtitle: shownPrompt, blocks: [{ type: 'compare', data }] })
     } catch (e) {
+      if (read) store.finishActivity(read, 'error')
       const message = e instanceof Error ? e.message : String(e)
       for (const r of answered) this.update(r.jobId, { status: 'done' })
       this.deps.announce(`The answers are in, but I couldn't compare them. ${message}`, null)

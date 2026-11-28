@@ -429,6 +429,7 @@ export class Brain {
    * The model may then answer SILENT when it wasn't meant for Watson; nothing is spoken or kept.
    */
   async respond(text: string, opts: { spoken: boolean; signal: AbortSignal; host: ToolHost; onText: (delta: string) => void; unprompted?: boolean }): Promise<string> {
+    const started = Date.now()
     const settings = getSettings()
     this.checkBudget(settings)
     const client = this.getClient()
@@ -505,8 +506,10 @@ export class Brain {
       const results = await Promise.all(
         calls.map(async (call): Promise<Anthropic.Beta.BetaToolResultBlockParam> => {
           toolsUsed.push(call.name)
+          const t0 = Date.now()
           try {
             const out = await this.runTool(call.name, call.input, settings, opts.host)
+            if (Date.now() - t0 > 3000) console.log(`[watson] tool ${call.name} took ${((Date.now() - t0) / 1000).toFixed(1)} s`)
             return { type: 'tool_result', tool_use_id: call.id, content: out }
           } catch (e) {
             console.warn(`[watson] tool ${call.name} failed:`, (e instanceof Error ? e.message : String(e)).slice(0, 300))
@@ -517,7 +520,7 @@ export class Brain {
       messages.push({ role: 'user', content: results })
     }
 
-    console.log(`[watson] answered (${model === SONNET ? 'Sonnet' : 'Haiku'}, ${mode(opts.spoken)}) tools: ${toolsUsed.join(', ') || 'none'}`)
+    console.log(`[watson] answered (${model === SONNET ? 'Sonnet' : 'Haiku'}, ${mode(opts.spoken)}) in ${((Date.now() - started) / 1000).toFixed(1)} s, tools: ${toolsUsed.join(', ') || 'none'}`)
     if (isSilent(finalText)) {
       console.log('[watson] stayed quiet: not meant for Watson')
       return SILENT

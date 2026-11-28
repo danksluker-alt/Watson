@@ -61,6 +61,10 @@ export function startMockApi(port) {
       }
     }
     if (/^ask (claude and grok|everyone)/.test(t)) return { tools: [{ name: 'ask_several', input: { agents: ['claude', 'grok'], request: text.replace(/^ask (claude and grok|everyone)/i, '').trim().replace(/^./, (c) => c.toUpperCase()), sensitive: false } }] }
+    if (t.startsWith('email both')) return { tools: [
+      { name: 'delegate', input: { agent: 'claude', request: 'Email Sarah that the launch moved', sensitive: true } },
+      { name: 'delegate', input: { agent: 'claude', request: 'Email Sam that the launch moved', sensitive: true } },
+    ] }
     if (/^send that to claude/.test(t)) return { tools: [{ name: 'delegate', input: { agent: 'claude', request: 'Turn it into a short summary', sensitive: false, include_previous_answer: true } }] }
     if (/^(ask|have|tell) grok/.test(t)) return { tools: [{ name: 'delegate', input: { agent: 'grok', request: text.replace(/^(ask|have|tell) grok( to)?/i, '').trim().replace(/^./, (c) => c.toUpperCase()), sensitive: false } }] }
     if (/^(ask|have|tell) claude/.test(t)) {
@@ -102,6 +106,7 @@ export function startMockApi(port) {
     if (t.startsWith('pin ') || /\btimer\b/.test(t) || t.startsWith('check off') || t.startsWith('remember') || t.includes('volume')) return r.split('. It ends')[0] + '.'
     if (/^ask (claude and grok|everyone)/.test(t)) return 'I’ve asked Claude and Grok. I’ll compare their answers when they’re in.'
     if (/^send that to claude/.test(t)) return 'I’ve passed it to Claude.'
+    if (t.startsWith('email both')) return 'Both are waiting for your OK.'
     if (/^(ask|have|tell) (grok|claude)/.test(t)) return r.includes('confirm') ? 'I’ll hand that to Claude as soon as you confirm.' : `I’ve handed that to ${t.includes('grok') ? 'Grok' : 'Claude'}. I’ll tell you what comes back.`
     if (t.includes('weather')) {
       const j = JSON.parse(r)

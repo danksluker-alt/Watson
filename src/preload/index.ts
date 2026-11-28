@@ -19,6 +19,7 @@ const api: WatsonAPI = {
   talkLive: (draft?: string) => ipcRenderer.send('ui:talkLive', draft ?? ''),
   pillMenu: () => ipcRenderer.send('pill:menu'),
   replyToAgent: (agentId: string, text: string) => ipcRenderer.send('agent:reply', agentId, text),
+  openVoiceSettings: () => ipcRenderer.send('ui:openVoiceSettings'),
   ask: (text) => ipcRenderer.send('ui:ask', text),
   cancel: () => ipcRenderer.send('ui:cancel'),
   dismiss: () => ipcRenderer.send('ui:dismiss'),

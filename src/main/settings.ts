@@ -36,6 +36,7 @@ export const DEFAULT_SETTINGS: Settings = {
   // Click or ⌥Space opens dictation: nothing is sent until you press Send.
   inputMode: 'review',
   wakeWord: false,
+  voiceGender: 'any',
   sounds: true,
   musicApp: 'spotify',
   browserBundleId: '',

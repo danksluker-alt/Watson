@@ -151,11 +151,15 @@ export function SettingsPage() {
 
   const lang = s?.speechLocale.slice(0, 2) ?? 'en'
   const voiceOptions = useMemo(() => {
-    const rank = { premium: 0, enhanced: 1, default: 2 } as const
+    // Most human-sounding first; novelty and robotic voices are left out.
+    const rank = { siri: 0, premium: 1, enhanced: 2, default: 3 } as const
+    const novelty = /speech\.synthesis\.voice|eloquence/
+    const g = s?.voiceGender ?? 'any'
     return voices
-      .filter((v) => v.language.startsWith(lang))
+      .filter((v) => v.language.startsWith(lang) && !novelty.test(v.id) && (g === 'any' || v.gender === g || !v.gender))
       .sort((a, b) => rank[a.quality as keyof typeof rank] - rank[b.quality as keyof typeof rank] || a.name.localeCompare(b.name))
-  }, [voices, lang])
+  }, [voices, lang, s?.voiceGender])
+  const naturalMale = voices.some((v) => v.language.startsWith(lang) && v.gender === 'male' && ['siri', 'premium', 'enhanced'].includes(v.quality))
 
   if (!s || !secrets) return <div className="settings" />
 
@@ -229,17 +233,29 @@ export function SettingsPage() {
         <Row label="Sounds" hint="Soft chimes when Watson listens and answers">
           <Toggle on={s.sounds} onChange={(v) => save({ sounds: v })} />
         </Row>
-        <Row label="Voice">
+        <Row label="Voice" hint={s.voiceGender === 'male' && !naturalMale ? 'No natural male voice yet: get one free with “Get more voices” (Siri voices sound most human)' : undefined}>
+          <div className="segmented light">
+            {(['male', 'female', 'any'] as const).map((g) => (
+              <button key={g} className={s.voiceGender === g ? 'on' : ''} onClick={() => save({ voiceGender: g, voiceId: '' })}>
+                {g === 'male' ? 'Male' : g === 'female' ? 'Female' : 'Any'}
+              </button>
+            ))}
+          </div>
+        </Row>
+        <Row label="">
           <select value={s.voiceId} onChange={(e) => save({ voiceId: e.target.value })}>
             <option value="">Best available</option>
             {voiceOptions.map((v) => (
               <option key={v.id} value={v.id}>
-                {v.name} ({v.language}){v.quality !== 'default' ? ` · ${v.quality}` : ''}
+                {v.name} ({v.language}){v.quality === 'premium' ? ' · Premium' : v.quality === 'enhanced' ? ' · Enhanced' : ''}
               </option>
             ))}
           </select>
           <button className="btn small" onClick={() => window.watson.testVoice()}>
             Test
+          </button>
+          <button className="btn small" onClick={() => window.watson.openVoiceSettings()}>
+            Get more voices
           </button>
         </Row>
         <Row label="Speaking rate">

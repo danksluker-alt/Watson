@@ -276,6 +276,22 @@ await scenario('Dashboard in front: the panel folds into the pill', async () => 
   return 'opening the dashboard folded the panel away; closing it brought Watson back'
 })
 
+await scenario('Two requests that need an OK are asked one after the other', async () => {
+  await talk('Email both Sarah and Sam that the launch moved')
+  await overlay.waitForSelector('.confirm', { timeout: 10_000 })
+  const first = await overlay.textContent('.confirm')
+  await overlay.click('.confirm .btn.primary')
+  await until(async () => (await overlay.$('.confirm')) && (await overlay.textContent('.confirm')) !== first, 5000)
+  await overlay.click('.confirm .btn.primary')
+  const sent = await until(async () => {
+    const s = (await helper('/state')).sent
+    return s.length === 2 ? s : null
+  }, 15_000)
+  assert(sent.some((x) => x.text.includes('Sarah')) && sent.some((x) => x.text.includes('Sam')), 'both should go out after their OK')
+  await until(async () => (await spokenText()).match(/Claude answered/g)?.length === 2, 25_000)
+  return 'the second confirmation appeared after the first was answered; both went out'
+})
+
 await scenario('Sensitive request waits for “send”', async () => {
   await talk('Ask Claude to email Sarah that the launch moved to Friday')
   await overlay.waitForSelector('.confirm', { timeout: 10_000 })
