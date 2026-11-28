@@ -2,7 +2,7 @@
 // a live caption while you talk, into an editor when you dictate to review,
 // and into a full panel when there's something to see.
 import { AnimatePresence, motion } from 'motion/react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import type { UIState } from '@shared/types'
 import { ArrowUp, Check, Close, Grid, InsertText, Keyboard, Mic, Pencil, Sparkle, Speaker, Trash, Warning, Wave } from './components/Icons'
 import { Markdown } from './components/Markdown'
@@ -27,7 +27,7 @@ const EASE_OUT = [0.22, 1, 0.36, 1] as const
 const contentMotion = {
   initial: { opacity: 0, scale: 0.97, filter: 'blur(6px)' },
   animate: { opacity: 1, scale: 1, filter: 'blur(0px)', transition: { duration: 0.34, delay: 0.07, ease: EASE_OUT } },
-  exit: { opacity: 0, scale: 0.98, filter: 'blur(4px)', transition: { duration: 0.14, ease: [0.4, 0, 1, 1] as const } }
+  exit: { opacity: 0, scale: 0.98, filter: 'blur(4px)', pointerEvents: 'none' as const, transition: { duration: 0.14, ease: [0.4, 0, 1, 1] as const } }
 }
 const WIDTH = { pill: 168, compact: 500, dictate: 560, panel: 680 }
 type Mode = keyof typeof WIDTH
@@ -36,9 +36,11 @@ function useMeasuredHeight() {
   const [h, setH] = useState(0)
   const observer = useRef<ResizeObserver | null>(null)
   // A callback ref, so measuring starts whenever the element actually mounts.
+  // Each view layer gets this ref; the newest one to mount is measured. An old layer leaving later
+  // (after its fade) must not stop that, so a null call is ignored.
   const ref = useCallback((el: HTMLDivElement | null) => {
-    observer.current?.disconnect()
     if (!el) return
+    observer.current?.disconnect()
     observer.current = new ResizeObserver(([e]) => setH(Math.ceil(e.borderBoxSize?.[0]?.blockSize ?? e.contentRect.height)))
     observer.current.observe(el)
   }, [])
@@ -393,6 +395,18 @@ export function Overlay() {
   prevArea.current = area
   const growing = growDir.current
 
+  // Every view sits centred at its own final width, anchored to the edge the island grows from. While
+  // the island changes size it simply reveals or clips them, so nothing inside reflows or jumps.
+  const layer = (w: number): CSSProperties => ({
+    width: w,
+    marginLeft: -w / 2,
+    ...(up ? { bottom: 0, transformOrigin: '50% 100%' } : { top: 0, transformOrigin: '50% 0%' })
+  })
+
+  // The pill instead stretches with the island itself, its orb and words held in the centre, so when
+  // the hover buttons fade away the island narrows around them without anything sliding.
+  const pillLayer: CSSProperties = { left: 0, right: 0, ...(up ? { bottom: 0 } : { top: 0 }) }
+
   const enter = () => {
     setHover(true)
     window.watson.setInteractive(true)
@@ -420,11 +434,13 @@ export function Overlay() {
         whileHover={mode === 'pill' && !hold.holding ? { scale: 1.04 } : undefined}
         transition={islandTransition(growing)}
       >
-        <div ref={contentRef} className="island-content" style={{ width }}>
-          <AnimatePresence mode="popLayout" initial={false}>
+        <div className="island-content">
+          <AnimatePresence initial={false}>
             {mode === 'pill' && (
               <motion.div
                 key="pill"
+                ref={contentRef}
+                style={pillLayer}
                 role="button"
                 tabIndex={0}
                 aria-label="Talk to Watson"
@@ -445,9 +461,9 @@ export function Overlay() {
                     <motion.button
                       key="dash"
                       className="pill-quick"
-                      initial={{ opacity: 0, scale: 0.6 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.6 }}
+                      initial={{ opacity: 0, scale: 0.5, filter: 'blur(3px)' }}
+                      animate={{ opacity: 1, scale: 1, filter: 'blur(0px)', transition: { duration: 0.3, delay: 0.06, ease: EASE_OUT } }}
+                      exit={{ opacity: 0, scale: 0.5, filter: 'blur(3px)', transition: { duration: 0.16, ease: [0.4, 0, 1, 1] } }}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation()
@@ -487,9 +503,9 @@ export function Overlay() {
                     <motion.button
                       key="live"
                       className="pill-quick live"
-                      initial={{ opacity: 0, scale: 0.6 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.6 }}
+                      initial={{ opacity: 0, scale: 0.5, filter: 'blur(3px)' }}
+                      animate={{ opacity: 1, scale: 1, filter: 'blur(0px)', transition: { duration: 0.3, delay: 0.06, ease: EASE_OUT } }}
+                      exit={{ opacity: 0, scale: 0.5, filter: 'blur(3px)', transition: { duration: 0.16, ease: [0.4, 0, 1, 1] } }}
                       onPointerDown={(e) => e.stopPropagation()}
                       onClick={(e) => {
                         e.stopPropagation()
@@ -508,6 +524,8 @@ export function Overlay() {
             {mode === 'compact' && (
               <motion.div
                 key="compact"
+                ref={contentRef}
+                style={layer(WIDTH.compact)}
                 className="compact"
                 onClick={() => window.watson.toggleListen()}
                 {...contentMotion}
@@ -544,6 +562,8 @@ export function Overlay() {
             {mode === 'dictate' && (
               <motion.div
                 key="dictate"
+                ref={contentRef}
+                style={layer(WIDTH.dictate)}
                 className="dictate"
                 {...contentMotion}
               >
@@ -556,6 +576,8 @@ export function Overlay() {
             {mode === 'panel' && (
               <motion.div
                 key="panel"
+                ref={contentRef}
+                style={layer(WIDTH.panel)}
                 className="panel"
                 {...contentMotion}
               >

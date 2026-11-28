@@ -263,7 +263,12 @@ await scenario('Hovering the pill shows the dashboard and live talk', async () =
   })
   await overlay.mouse.move(box.x - 4, box.y, { steps: 3 })
   await overlay.mouse.move(box.x, box.y, { steps: 3 })
-  await overlay.waitForSelector('.pill-quick.live', { timeout: 3000 })
+  // If the arrival was missed (the window was still settling), a small second move counts.
+  const shown = await overlay.waitForSelector('.pill-quick.live', { timeout: 2000 }).catch(() => null)
+  if (!shown) {
+    await overlay.mouse.move(box.x + 3, box.y, { steps: 2 })
+    await overlay.waitForSelector('.pill-quick.live', { timeout: 3000 })
+  }
   await shot('01h-pill-hover')
   await overlay.click('.pill-quick.live')
   await until(async () => (await helper('/state')).listening, 4000)

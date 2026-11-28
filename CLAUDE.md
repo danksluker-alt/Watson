@@ -124,6 +124,10 @@
   it when read. `ui:cancel`, helper exit, and voice-output failure all end in idle (never stuck thinking).
   `syncWake` also runs after dismiss, stopped speech, confirm answers and agent drafts.
 - Island motion (`islandTransition` in Overlay.tsx): growing = lively spring, wide first then tall; shrinking =
-  soft no-bounce spring, folds up first then narrows. Content cross-fades via `contentMotion`. e2e waits for the
+  soft no-bounce spring, folds up first then narrows. Each view is its own layer (`layer()`), pinned at its final
+  width, centred and anchored to the edge the island grows from, so resizing only reveals or clips it (no reflow);
+  layers cross-fade via `contentMotion` (exiting layers ignore clicks) and the newest layer is the one measured.
+  The pill layer instead stretches with the island (`pillLayer`): orb/text stay centred, the hover shortcuts are
+  absolutely placed at the ends, so they fade out without moving anything. e2e waits for the
   circle to settle before aiming at it. The fake helper moves any fixture event happening now/soon an hour out,
   so pill tests don't depend on the time of day.

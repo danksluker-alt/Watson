@@ -140,7 +140,13 @@ html[data-view='overlay'] body {
 }
 
 .island-content {
-  position: relative;
+  position: absolute;
+  inset: 0;
+}
+
+.island-content > * {
+  position: absolute;
+  left: 50%;
 }
 
 /* ---- pill ---- */
@@ -3806,6 +3812,9 @@ html[data-view='home'] body {
 .send-round {
   width: 34px;
   height: 34px;
+  padding: 0;
+  gap: 0;
+  flex: none;
   margin-left: 6px;
   border-radius: 50%;
   display: grid;
@@ -3850,28 +3859,31 @@ html[data-view='home'] body {
 
 /* ---- Pill shortcuts on hover ---- */
 
-.pill.quick {
-  justify-content: space-between;
-  padding: 0 4px;
-  gap: 4px;
+/* The orb and words stay centred; the two shortcuts float at the ends and never push them around. */
+.island-content > .pill {
+  width: auto;
+  justify-content: center;
+  padding: 0;
 }
 
 .pill-core {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 9px;
   min-width: 0;
-  flex: 1;
-  justify-content: center;
+  max-width: calc(100% - 24px);
 }
 
-.pill:not(.quick) .pill-core {
-  justify-content: flex-start;
+.pill-quick {
+  position: absolute;
+  top: 5px;
+  left: 5px;
 }
 
-.pill.circle-like .pill-core,
-.island.circle .pill-core {
-  justify-content: center;
+.pill-quick.live {
+  left: auto;
+  right: 5px;
 }
 
 .pill-quick {
@@ -3893,11 +3905,6 @@ html[data-view='home'] body {
 
 .pill-quick.live:hover {
   background: linear-gradient(135deg, #bf5af2, #0a84ff);
-}
-
-.island.circle .pill.quick {
-  justify-content: space-between;
-  padding: 0 5px;
 }
 
 /* ---- Dashboard: automations ---- */
