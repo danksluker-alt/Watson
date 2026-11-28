@@ -17,6 +17,10 @@ import { getStock } from './tools/stocks'
 import { getCalendar } from './tools/calendar'
 import { spentToday } from './usage'
 import { draftExpired, readSavedDraft, writeSavedDraft } from './savedDraft'
+import { automations } from './automations'
+import { macControl } from './tools/mac'
+import { osascript, runOs, asString } from './tools/os'
+import type { AutomationItem } from '@shared/types'
 import { timerName, timers as timerStore } from './timers'
 import type { TimerItem } from '@shared/types'
 import { paramsOf } from './widgets'
@@ -958,6 +962,36 @@ let confirmSeq = 0
 /** Confirmations wait their turn: one is shown at a time, the next appears when it's answered. */
 const confirmQueue: PendingConfirm[] = []
 
+/** A scheduled automation is due. Shutting down, restarting and sleeping wait a minute first. */
+async function runAutomation(a: AutomationItem) {
+  console.log(`[watson] automation due: ${a.action}`)
+  try {
+    if (a.action === 'shut_down' || a.action === 'restart' || a.action === 'sleep') {
+      const verb = a.action === 'shut_down' ? 'shut down' : a.action === 'restart' ? 'restart' : 'go to sleep'
+      new Notification({ title: 'Watson', body: `Your Mac will ${verb} in one minute.` }).show()
+      const ok = await Promise.race([
+        confirm(`${a.label} in one minute`, `Your scheduled automation. Save your work, or cancel it this time.`, a.action === 'shut_down' ? 'Shut down now' : a.action === 'restart' ? 'Restart now' : 'Sleep now'),
+        new Promise<boolean>((r) => setTimeout(() => r(true), 60_000)),
+      ])
+      // Clear the card if the minute ran out with nobody answering.
+      const card = store.state.confirm
+      if (card && card.title.startsWith(a.label)) confirms.get(card.id)?.(ok)
+      if (!ok) return console.log('[watson] automation cancelled by the user')
+      if (a.action === 'sleep') await runOs('/usr/bin/pmset', ['sleepnow'])
+      else await osascript(`tell application "System Events" to ${a.action === 'shut_down' ? 'shut down' : 'restart'}`)
+    } else if (a.action === 'open_app') await runOs('/usr/bin/open', ['-a', a.value ?? ''])
+    else if (a.action === 'quit_app') await osascript(`tell application ${asString(a.value ?? '')} to quit`)
+    else if (a.action === 'announce') {
+      new Notification({ title: 'Watson', body: a.value ?? a.label }).show()
+      announce(a.value ?? a.label, null)
+    } else await macControl(a.action === 'volume' ? 'volume' : a.action, a.action === 'volume' ? Number(a.value) || 30 : undefined)
+    console.log(`[watson] automation ran: ${a.action}`)
+  } catch (e) {
+    console.error('[watson] automation failed:', e instanceof Error ? e.message : e)
+    store.set({ notice: `The automation “${a.label}” didn’t work: ${e instanceof Error ? e.message : e}` })
+  }
+}
+
 function confirm(title: string, body: string, actionLabel: string): Promise<boolean> {
   const id = `c${++confirmSeq}`
   const item: PendingConfirm = { id, title, body, actionLabel }
@@ -1156,7 +1190,9 @@ function registerIpc() {
     const text = String(draft ?? '').trim().slice(0, 8000)
     if (listening) helper.send('listen.cancel')
     listening = false
-    store.set({ draft: null, draftParked: false, error: null, capture: 'live' })
+    // Words not being sent along stay safe in the pill.
+    const keep = !text && store.state.draft?.text.trim() ? store.state.draft : null
+    store.set({ draft: keep, draftParked: Boolean(keep), error: null, capture: 'live' })
     liveTalk = true
     if (text) return void handleUtterance(text, 'voice')
     startListening('fresh')
@@ -1256,6 +1292,8 @@ function registerIpc() {
     // A preview plays even when Watson is muted.
     if (helper.ready) helper.send('speak', { speakId: `s${++speakSeq}`, text: "Hi, I'm Watson. This is how I sound." })
   })
+  ipcMain.on('automation:remove', (_e, id: string) => automations.remove(String(id)))
+  ipcMain.on('automation:enabled', (_e, id: string, on: boolean) => automations.setEnabled(String(id), Boolean(on)))
   ipcMain.on('ui:setMuted', (_e, muted: boolean) => setMuted(Boolean(muted)))
   ipcMain.on('ui:takeOver', (_e, text: string) => takeOver(String(text ?? '').slice(0, 8000)))
 
@@ -1332,6 +1370,9 @@ app.whenReady().then(() => {
   history.on('change', (h) => {
     if (homeWin && !homeWin.isDestroyed()) homeWin.webContents.send('history', h)
   })
+  automations.on('change', (list: AutomationItem[]) => store.set({ automations: list }))
+  automations.on('run', (a: AutomationItem) => void runAutomation(a))
+  automations.restore()
   timerStore.on('change', (list: TimerItem[]) => store.set({ timers: list }))
   timerStore.on('fire', onTimerFire)
   timerStore.restore()

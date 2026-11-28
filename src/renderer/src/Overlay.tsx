@@ -4,7 +4,7 @@
 import { AnimatePresence, motion } from 'motion/react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { UIState } from '@shared/types'
-import { Check, Close, Gear, InsertText, Keyboard, Mic, Pencil, Sparkle, Speaker, Warning } from './components/Icons'
+import { ArrowUp, Check, Close, Gear, Grid, InsertText, Keyboard, Mic, Pencil, Sparkle, Speaker, Trash, Warning, Wave } from './components/Icons'
 import { Markdown } from './components/Markdown'
 import { Bars, Orb } from './components/Orb'
 import { play } from './sounds'
@@ -155,13 +155,22 @@ function DraftEditor({ s }: { s: UIState }) {
           <span className="caret" />
         </div>
         <Bars />
+        <LiveSwitch s={s} text={text} />
       </div>
     )
   }
 
+  const destIcon = (id: string, size = 13) => {
+    if (id === 'watson') return <Sparkle size={size} />
+    if (id === 'insert') return <InsertText size={size} />
+    return <AgentMark name={s.agents.find((a) => a.id === id)?.name ?? ''} small />
+  }
+  const destName = (id: string) => (id === 'watson' ? 'Auto' : id === 'insert' ? appName(s) : (s.agents.find((a) => a.id === id)?.name ?? ''))
+  const dests = ['watson', ...s.agents.map((a) => a.id), 'insert']
+
   return (
     <div className="draft">
-      <div className="draft-box">
+      <div className="composer">
         <textarea
           ref={area}
           value={text}
@@ -175,58 +184,52 @@ function DraftEditor({ s }: { s: UIState }) {
           placeholder="Ask anything…"
           spellCheck
         />
-      </div>
-      <AnimatePresence initial={false}>
-        {more && (
-          <motion.div
-            key="more"
-            className="draft-more"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: 'auto', opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
-          >
-            <div className="more-row draft-targets">
-              <span className="more-label">Send to</span>
-              <button className={to === 'watson' ? 'chip on' : 'chip'} onClick={() => choose('watson')} title="Watson answers, or hands it to the AI that fits best">
-                <Sparkle size={12} /> Auto
-              </button>
-              {s.agents.map((a) => (
-                <button key={a.id} className={to === a.id ? 'chip on' : 'chip'} onClick={() => choose(a.id)}>
-                  <AgentMark name={a.name} small /> {a.name}
-                </button>
-              ))}
-              <button className={to === 'insert' ? 'chip on' : 'chip'} onClick={() => choose('insert')} title="Type it where your cursor was">
-                <InsertText size={12} /> Type into {appName(s)}
-              </button>
-            </div>
-            <div className="more-row">
-              <span className="more-label">Voice</span>
-              <button className="chip" onClick={() => window.watson.dictate(text)}>
-                <Mic size={12} /> Keep talking
-              </button>
-              <button className="chip" onClick={() => window.watson.talkLive(to === 'watson' ? text : '')} title="Watson answers out loud and keeps listening">
-                <span className="live-dot" /> Talk live
-              </button>
-            </div>
+        <div className="composer-bar">
+          <motion.div layout className={more ? 'dest open' : 'dest'} transition={{ type: 'spring', stiffness: 520, damping: 38 }}>
+            {more ? (
+              dests.map((id) => (
+                <motion.button
+                  key={id}
+                  layout
+                  initial={{ opacity: 0, scale: 0.9 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  className={to === id ? 'dest-opt on' : 'dest-opt'}
+                  onClick={() => choose(id)}
+                  title={id === 'watson' ? 'Auto: Watson answers or picks the best AI' : id === 'insert' ? `Type into ${appName(s)}` : `Send to ${destName(id)}`}
+                >
+                  {destIcon(id)}
+                  <span>{destName(id)}</span>
+                </motion.button>
+              ))
+            ) : (
+              <motion.button layout className="dest-opt current" onClick={() => setMore(true)} aria-label="Where it goes" title="Where it goes">
+                {destIcon(to)}
+                <span>{destName(to)}</span>
+                <svg className="route-chev" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </motion.button>
+            )}
           </motion.div>
-        )}
-      </AnimatePresence>
-      <div className="draft-actions">
-        <button className={more ? 'route on' : 'route'} onClick={() => setMore(!more)} aria-expanded={more} aria-label="Where it goes and more">
-          {to === 'watson' ? <Sparkle size={12} /> : to === 'insert' ? <InsertText size={12} /> : <AgentMark name={agent?.name ?? ''} small />}
-          <span>{to === 'watson' ? 'Auto' : to === 'insert' ? `Type into ${appName(s)}` : agent?.name}</span>
-          <svg className={more ? 'route-chev open' : 'route-chev'} width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M6 9l6 6 6-6" />
-          </svg>
-        </button>
-        <span className="flex" />
-        <button className="btn ghost" onClick={() => window.watson.cancelDraft()}>
-          Discard
-        </button>
-        <button className="btn primary send-btn" onClick={send} disabled={!text.trim()}>
-          {label} <span className="kbd">↵</span>
-        </button>
+          <span className="flex" />
+          {!more && (
+            <>
+              <button className="round-btn" onClick={() => window.watson.dictate(text)} aria-label="Keep talking" title="Keep talking">
+                <Mic size={15} />
+              </button>
+              <button className="round-btn live" onClick={() => window.watson.talkLive(to === 'watson' ? text : '')} aria-label="Talk live" title="Talk live">
+                <Wave size={15} />
+              </button>
+              <span className="bar-sep" />
+              <button className="round-btn" onClick={() => window.watson.cancelDraft()} aria-label="Discard" title="Discard">
+                <Trash size={15} />
+              </button>
+            </>
+          )}
+          <button className="send-round send-btn" onClick={send} disabled={!text.trim()} aria-label={label} title={`${label} (Return)`}>
+            <ArrowUp size={16} />
+          </button>
+        </div>
       </div>
     </div>
   )
@@ -244,6 +247,28 @@ function modeOf(s: UIState): Mode {
   if (s.tucked && s.phase === 'idle' && !s.ringing) return 'pill'
   const hasPanel = Boolean(s.panel || s.confirm || s.error || s.notice || s.ringing || (s.expanded && s.reply))
   return hasPanel ? 'panel' : s.phase !== 'idle' ? 'compact' : 'pill'
+}
+
+/** While Watson listens: switch between dictating (Send when done) and a live conversation. */
+function LiveSwitch({ s, text = '' }: { s: UIState; text?: string }) {
+  const live = s.capture === 'live'
+  return (
+    <button
+      className={live ? 'live-switch on' : 'live-switch'}
+      onMouseDown={(e) => e.stopPropagation()}
+      onClick={(e) => {
+        e.stopPropagation()
+        if (live) return window.watson.setCapture('review')
+        // Earlier words waiting in the box go along; otherwise this sentence just continues live.
+        if (text.trim()) window.watson.talkLive(`${text.trim()} ${s.transcript}`.trim())
+        else window.watson.setCapture('live')
+      }}
+      aria-label={live ? 'Switch to dictation' : 'Switch to live talk'}
+      title={live ? 'Live talk · click to dictate instead' : 'Talk live'}
+    >
+      <Wave size={14} />
+    </button>
+  )
 }
 
 function MuteButton({ s }: { s: UIState }) {
@@ -265,6 +290,12 @@ function MuteButton({ s }: { s: UIState }) {
 export function Overlay() {
   const [s, setS] = useState<UIState | null>(null)
   const [hover, setHover] = useState(false)
+  const [hoverLong, setHoverLong] = useState(false)
+  useEffect(() => {
+    if (!hover) return setHoverLong(false)
+    const t = setTimeout(() => setHoverLong(true), 220)
+    return () => clearTimeout(t)
+  }, [hover])
   const [contentRef, contentH] = useMeasuredHeight()
 
   useEffect(() => {
@@ -293,9 +324,11 @@ export function Overlay() {
   const jobs = s.jobs.filter((j) => !['done', 'failed'].includes(j.status))
   // At rest it's a circle (unless the user chose the pill); it grows to say what's going on.
   const shown = s.arranging ? null : live
+  // Hovering the pill shows two small shortcuts beside it: the dashboard and live talk.
+  const quick = mode === 'pill' && hoverLong && !s.arranging && !hold.holding
   const circle = mode === 'pill' && s.pillShape === 'circle' && !shown
-  const pillText = shown?.text ?? (hover && !s.arranging ? '⌥ Space' : 'Watson')
-  const width = mode === 'pill' ? (circle ? 38 : pillWidth(pillText)) : WIDTH[mode]
+  const pillText = shown?.text ?? 'Watson'
+  const width = mode === 'pill' ? (circle ? 38 : pillWidth(pillText)) + (quick ? 64 : 0) : WIDTH[mode]
   // Keep the island inside the window: near a screen edge it shifts instead of being cut off.
   const left = Math.max(8, Math.min(760 - width - 8, s.layout.centerX - width / 2))
   const up = s.layout.dir === 'up'
@@ -318,6 +351,7 @@ export function Overlay() {
         className={`island${hold.holding ? ' lifted' : ''}${circle ? ' circle' : ''}`}
         data-mode={mode}
         data-phase={s.phase}
+        data-capture={s.capture}
         onMouseEnter={enter}
         onMouseLeave={leave}
         initial={false}
@@ -329,9 +363,10 @@ export function Overlay() {
         <div ref={contentRef} className="island-content" style={{ width }}>
           <AnimatePresence mode="popLayout" initial={false}>
             {mode === 'pill' && (
-              <motion.button
+              <motion.div
                 key="pill"
-                className="pill"
+                role="button"
+                className={quick ? 'pill quick' : 'pill'}
                 {...hold.handlers}
                 onContextMenu={(e) => {
                   e.preventDefault()
@@ -341,29 +376,71 @@ export function Overlay() {
                 animate={{ opacity: 1, filter: 'blur(0px)' }}
                 exit={{ opacity: 0, filter: 'blur(6px)' }}
                 transition={{ duration: 0.18 }}
-                title="Click to dictate · right-click for more · hold to move"
+                title="Click to talk · right-click for more · hold to move"
               >
-                <Orb phase={shown?.tone === 'job' ? 'thinking' : 'idle'} size={circle ? 22 : 18} />
-                {!circle && (
-                  <AnimatePresence mode="popLayout" initial={false}>
-                    <motion.span
-                      key={shown?.key ?? pillText}
-                      className={`pill-label${shown ? ` live ${shown.tone}` : ''}`}
-                      initial={{ opacity: 0, y: up ? -8 : 8 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: up ? 8 : -8 }}
-                      transition={{ duration: 0.28 }}
+                <AnimatePresence initial={false}>
+                  {quick && (
+                    <motion.button
+                      key="dash"
+                      className="pill-quick"
+                      initial={{ opacity: 0, scale: 0.6 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.6 }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        window.watson.openWindow()
+                      }}
+                      aria-label="Open the dashboard"
+                      title="Dashboard"
                     >
-                      {shown?.tone === 'timer' && <span className="pill-timer-dot" />}
-                      {shown?.tone === 'done' && <Check size={11} />}
-                      {shown?.tone === 'attention' && <Warning size={11} />}
-                      {shown?.tone === 'event' && <span className="pill-event-dot" />}
-                      {shown?.tone === 'unsent' && <Pencil size={11} />}
-                      <span className="pill-text">{pillText}</span>
-                    </motion.span>
-                  </AnimatePresence>
-                )}
-              </motion.button>
+                      <Grid size={13} />
+                    </motion.button>
+                  )}
+                </AnimatePresence>
+                <span className="pill-core">
+                  <Orb phase={shown?.tone === 'job' ? 'thinking' : 'idle'} size={circle ? 22 : 18} />
+                  {!circle && (
+                    <AnimatePresence mode="popLayout" initial={false}>
+                      <motion.span
+                        key={shown?.key ?? pillText}
+                        className={`pill-label${shown ? ` live ${shown.tone}` : ''}`}
+                        initial={{ opacity: 0, y: up ? -8 : 8 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: up ? 8 : -8 }}
+                        transition={{ duration: 0.28 }}
+                      >
+                        {shown?.tone === 'timer' && <span className="pill-timer-dot" />}
+                        {shown?.tone === 'done' && <Check size={11} />}
+                        {shown?.tone === 'attention' && <Warning size={11} />}
+                        {shown?.tone === 'event' && <span className="pill-event-dot" />}
+                        {shown?.tone === 'unsent' && <Pencil size={11} />}
+                        <span className="pill-text">{pillText}</span>
+                      </motion.span>
+                    </AnimatePresence>
+                  )}
+                </span>
+                <AnimatePresence initial={false}>
+                  {quick && (
+                    <motion.button
+                      key="live"
+                      className="pill-quick live"
+                      initial={{ opacity: 0, scale: 0.6 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.6 }}
+                      onPointerDown={(e) => e.stopPropagation()}
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        window.watson.talkLive('')
+                      }}
+                      aria-label="Talk live"
+                      title="Talk live"
+                    >
+                      <Wave size={13} />
+                    </motion.button>
+                  )}
+                </AnimatePresence>
+              </motion.div>
             )}
 
             {mode === 'compact' && (
@@ -400,6 +477,7 @@ export function Overlay() {
                   {s.phase === 'speaking' && <div className="caption">{tail(s.reply, 160)}</div>}
                 </div>
                 {s.phase === 'listening' && <Bars />}
+                {s.phase === 'listening' && <LiveSwitch s={s} />}
                 {s.phase === 'speaking' && <MuteButton s={s} />}
               </motion.div>
             )}

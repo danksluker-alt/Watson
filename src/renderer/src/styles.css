@@ -2921,17 +2921,39 @@ html[data-view='home'] body {
 
 .home-side nav button {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  gap: 10px;
   text-align: left;
-  padding: 7px 10px;
-  border-radius: 8px;
+  padding: 8px 10px;
+  border-radius: 9px;
   font-weight: 500;
+  color: var(--label-2);
   cursor: pointer;
+  transition: background 0.18s, color 0.18s;
+}
+
+.home-side nav button svg {
+  flex: none;
+  opacity: 0.85;
+}
+
+.home-side nav button .nav-label {
+  flex: 1;
+}
+
+.home-side nav button:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--label);
 }
 
 .home-side nav button.on {
   background: rgba(255, 255, 255, 0.1);
+  color: var(--label);
+}
+
+.home-side nav button.on svg {
+  color: #64d2ff;
+  opacity: 1;
 }
 
 .home-side .count {
@@ -2968,7 +2990,20 @@ html[data-view='home'] body {
 .home-scroll {
   flex: 1;
   overflow-y: auto;
-  padding: 44px 28px 12px;
+  padding: 8px 28px 12px;
+}
+
+.home-head {
+  padding: 40px 28px 8px;
+  -webkit-app-region: drag;
+}
+
+.home-head h2 {
+  margin: 0;
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
 }
 
 .home-empty {
@@ -3558,4 +3593,409 @@ html[data-view='home'] body {
 .pill-label.live .pill-text {
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* ---- Live talk vs dictation: live glows, dictation stays calm ---- */
+
+.island[data-phase='listening'][data-capture='review']::after {
+  opacity: 0.55;
+  background: conic-gradient(from var(--glow-angle), rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.6), rgba(100, 210, 255, 0.5), rgba(255, 255, 255, 0.05) 40%, rgba(255, 255, 255, 0.05));
+  animation: glow-turn 3.6s linear infinite;
+}
+
+.island[data-capture='live'][data-phase='listening']::after,
+.island[data-capture='live'][data-phase='speaking']::after {
+  opacity: 1;
+  padding: 2px;
+  animation: glow-turn 2.6s linear infinite;
+}
+
+.island[data-capture='live'][data-phase='listening'],
+.island[data-capture='live'][data-phase='speaking'] {
+  animation: live-aura 4s ease-in-out infinite;
+}
+
+@keyframes live-aura {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0.5px rgba(255, 255, 255, 0.08),
+      0 0 22px 2px rgba(191, 90, 242, 0.55),
+      0 0 46px 6px rgba(10, 132, 255, 0.28),
+      0 12px 40px rgba(0, 0, 0, 0.3);
+  }
+  50% {
+    box-shadow:
+      0 0 0 0.5px rgba(255, 255, 255, 0.08),
+      0 0 26px 3px rgba(255, 55, 95, 0.5),
+      0 0 54px 8px rgba(100, 210, 255, 0.3),
+      0 12px 40px rgba(0, 0, 0, 0.3);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .island[data-capture='live'] {
+    animation: none !important;
+  }
+}
+
+.live-switch {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--label-2);
+  background: rgba(255, 255, 255, 0.08);
+  transition: background 0.2s, color 0.2s, box-shadow 0.25s, transform 0.12s;
+}
+
+.live-switch:hover {
+  background: rgba(255, 255, 255, 0.16);
+  color: var(--label);
+}
+
+.live-switch:active {
+  transform: scale(0.92);
+}
+
+.live-switch.on {
+  color: #fff;
+  background: linear-gradient(135deg, #bf5af2, #0a84ff);
+  box-shadow: 0 0 14px rgba(191, 90, 242, 0.6);
+}
+
+/* ---- Composer ---- */
+
+.composer {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 20px;
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+  transition: box-shadow 0.25s, background 0.25s;
+  padding: 12px 10px 8px 14px;
+}
+
+.composer:focus-within {
+  background: rgba(255, 255, 255, 0.075);
+  box-shadow:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.16),
+    0 0 0 3px rgba(10, 132, 255, 0.22);
+}
+
+.composer textarea {
+  width: 100%;
+  resize: none;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--label);
+  font: 500 16px/1.45 var(--font);
+  min-height: 52px;
+  padding-right: 4px;
+  user-select: text;
+}
+
+.composer textarea::placeholder {
+  color: var(--label-3);
+}
+
+.composer-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 6px;
+  margin-left: -6px;
+  min-height: 34px;
+}
+
+.composer-bar .flex {
+  flex: 1;
+}
+
+.dest {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+}
+
+.dest.open {
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+}
+
+.dest-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--label-2);
+  white-space: nowrap;
+  transition: background 0.18s, color 0.18s;
+}
+
+.dest-opt:hover {
+  color: var(--label);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.dest-opt.on {
+  color: #fff;
+  background: rgba(10, 132, 255, 0.85);
+}
+
+.dest-opt.current .route-chev {
+  opacity: 0.5;
+  margin-left: -1px;
+}
+
+.round-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--label-2);
+  transition: background 0.18s, color 0.18s, transform 0.12s;
+}
+
+.round-btn:hover {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--label);
+}
+
+.round-btn:active,
+.send-round:active {
+  transform: scale(0.92);
+}
+
+.round-btn.live:hover {
+  color: #d9a6ff;
+}
+
+.bar-sep {
+  width: 0.5px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--hairline);
+}
+
+.send-round {
+  width: 32px;
+  height: 32px;
+  margin-left: 4px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: #0a84ff;
+  box-shadow: 0 4px 14px rgba(10, 132, 255, 0.4);
+  transition: background 0.2s, opacity 0.2s, transform 0.12s, box-shadow 0.2s;
+}
+
+.send-round:hover {
+  background: #2b95ff;
+}
+
+.send-round:disabled {
+  opacity: 0.35;
+  box-shadow: none;
+}
+
+/* ---- Pill shortcuts on hover ---- */
+
+.pill.quick {
+  justify-content: space-between;
+  padding: 0 4px;
+  gap: 4px;
+}
+
+.pill-core {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  flex: 1;
+  justify-content: center;
+}
+
+.pill:not(.quick) .pill-core {
+  justify-content: flex-start;
+}
+
+.pill.circle-like .pill-core,
+.island.circle .pill-core {
+  justify-content: center;
+}
+
+.pill-quick {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--label-2);
+  background: rgba(255, 255, 255, 0.08);
+  transition: background 0.18s, color 0.18s;
+}
+
+.pill-quick:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.pill-quick.live:hover {
+  background: linear-gradient(135deg, #bf5af2, #0a84ff);
+}
+
+.island.circle .pill.quick {
+  justify-content: space-between;
+  padding: 0 5px;
+}
+
+/* ---- Dashboard: automations ---- */
+
+.side-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--label-2);
+  font-size: 12px;
+  padding: 4px 4px;
+  border-radius: 6px;
+}
+
+.side-link:hover {
+  color: var(--label);
+}
+
+.empty-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 8px;
+  color: #ffd60a;
+  background: rgba(255, 214, 10, 0.12);
+}
+
+.auto-page {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  max-width: 720px;
+}
+
+.section-title {
+  margin: 0 0 8px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  color: var(--label-3);
+}
+
+.auto-list {
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+  box-shadow: inset 0 0 0 0.5px var(--hairline);
+  overflow: hidden;
+}
+
+.auto-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 12px 11px 14px;
+  transition: background 0.18s, opacity 0.2s;
+}
+
+.auto-row + .auto-row {
+  border-top: 0.5px solid var(--hairline);
+}
+
+.auto-row:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.auto-row.off {
+  opacity: 0.55;
+}
+
+.auto-icon {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  border-radius: 9px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: linear-gradient(135deg, #5e5ce6, #0a84ff);
+}
+
+.auto-icon.shut_down,
+.auto-icon.restart,
+.auto-icon.sleep {
+  background: linear-gradient(135deg, #ff375f, #ff9f0a);
+}
+
+.auto-icon.dark_mode,
+.auto-icon.sleep_display {
+  background: linear-gradient(135deg, #3a3a6a, #5e5ce6);
+}
+
+.auto-icon.timer {
+  background: linear-gradient(135deg, #ff9f0a, #ffd60a);
+  color: #1c1c1e;
+}
+
+.auto-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.auto-title {
+  font-weight: 600;
+}
+
+.auto-when {
+  font-size: 12px;
+  color: var(--label-2);
+  margin-top: 1px;
+}
+
+.row-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--label-3);
+  transition: background 0.18s, color 0.18s;
+}
+
+.row-icon:hover {
+  color: #ff453a;
+  background: rgba(255, 69, 58, 0.12);
+}
+
+/* The dictation island is the composer itself: no box inside a box. */
+.dictate .draft {
+  padding: 0;
+}
+
+.dictate .composer,
+.dictate .composer:focus-within {
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+  padding: 16px 14px 14px 20px;
 }

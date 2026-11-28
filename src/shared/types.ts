@@ -93,6 +93,27 @@ export type TimerItem = {
 
 export type TimersData = { items: TimerItem[]; highlight?: string }
 
+/** Something Watson does on its own at a set time ("turn off my Mac at 11 pm every night"). */
+export type AutomationAction = 'shut_down' | 'restart' | 'sleep' | 'sleep_display' | 'dark_mode' | 'light_mode' | 'mute' | 'volume' | 'open_app' | 'quit_app' | 'announce'
+export type AutomationRepeat = 'once' | 'daily' | 'weekdays' | 'weekends'
+export type AutomationItem = {
+  id: string
+  /** Short name shown in the dashboard ("Shut down"). */
+  label: string
+  action: AutomationAction
+  /** App name, volume level or the words to say, depending on the action. */
+  value?: string
+  /** Local time, "HH:mm". */
+  time: string
+  /** For a one-off on a given day: "YYYY-MM-DD". */
+  date?: string
+  repeat: AutomationRepeat
+  enabled: boolean
+  nextAt: number
+  lastRunAt?: number
+  createdAt: number
+}
+
 export type DelegationData = {
   jobId: string
   agentId: string
@@ -227,6 +248,7 @@ export type UIState = {
   sounds: boolean
   /** Watson's voice is muted: answers are shown, not spoken. */
   muted: boolean
+  automations: AutomationItem[]
   /** Running timers and alarms, soonest first (the pill shows the next one). */
   timers: TimerItem[]
   /** A timer or alarm that just went off and hasn't been dismissed. */
@@ -337,6 +359,8 @@ export type WatsonAPI = {
   /** Brings a put-away draft back. */
   openDraft: () => void
   setMuted: (muted: boolean) => void
+  removeAutomation: (id: string) => void
+  setAutomationEnabled: (id: string, enabled: boolean) => void
   submitDraft: (text: string, target: string) => void
   cancelDraft: () => void
   pin: (block: Block) => void

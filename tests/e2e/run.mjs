@@ -148,9 +148,9 @@ await scenario('Click opens dictation: nothing is sent until Send', async () => 
     await sleep(1200)
     assert(!(await apiRequests()).some((r) => r.text.includes('Lisbon')), 'sent before pressing Send')
     assert(!(await helper('/state')).listening, 'still listening after the words were in')
-    assert((await overlay.textContent('.route')).includes('Auto'), 'Auto should be the default target')
+    assert((await overlay.textContent('.dest-opt.current')).includes('Auto'), 'Auto should be the default target')
     // Clean: the choices are one level down, not on the first view.
-    assert(!(await overlay.$('.draft-targets')), 'AI choices shown before asking for them')
+    assert(!(await overlay.$('.dest.open')), 'AI choices shown before asking for them')
     await shot('01c-dictation')
     await overlay.click('.send-btn')
     await overlay.waitForSelector('.weather', { timeout: 10_000 })
@@ -204,7 +204,7 @@ await scenario('An unsent message is kept when you click away', async () => {
     await overlay.waitForSelector('.draft textarea', { timeout: 5000 })
     assert((await overlay.inputValue('.draft textarea')).includes('spent a while'), 'the edited text came back different')
     assert(!(await helper('/state')).listening, 'reopening a draft turned the mic on')
-    await overlay.click('.btn.ghost:has-text("Discard")')
+    await overlay.click('.round-btn[aria-label="Discard"]')
     await until(async () => !fs.existsSync(path.join(userData, 'draft.json')), 4000)
     return 'Esc kept it in the pill, a click brought it back, Discard removed it'
   } finally {
@@ -228,6 +228,49 @@ await scenario('Mute Watson: answers show instead of being spoken', async () => 
   }
 })
 
+await scenario('Switch from dictating to live talk while speaking', async () => {
+  await setMode('review')
+  try {
+    await overlay.click('.pill')
+    await until(async () => (await helper('/state')).listening, 4000)
+    await helper('/partial', { text: 'How tall is' })
+    await overlay.waitForSelector('.dictation .live-switch', { timeout: 5000 })
+    assert((await overlay.getAttribute('.island', 'data-capture')) === 'review', 'not dictating at first')
+    await overlay.click('.live-switch')
+    await until(async () => (await overlay.getAttribute('.island', 'data-capture')) === 'live', 3000)
+    await overlay.waitForSelector('.live-switch.on', { timeout: 3000 })
+    await shot('01g-live-glow')
+    await helper('/say', { text: 'How tall is the Eiffel Tower?' })
+    await until(async () => (await spokenText()).includes('330 meters'), 10_000)
+    assert(!(await overlay.$('.send-btn')), 'asked to press Send in live talk')
+    return 'one click turned dictation into live talk: answered out loud with no Send step'
+  } finally {
+    await overlay.evaluate(() => window.watson.cancel())
+    await setMode('live')
+  }
+})
+
+await scenario('Hovering the pill shows the dashboard and live talk', async () => {
+  // Start away from it, so moving onto it counts as arriving.
+  await overlay.mouse.move(5, 700)
+  await until(async () => (await overlay.$('.pill')) !== null, 4000)
+  await sleep(300)
+  const box = await overlay.$eval('.island', (el) => {
+    const r = el.getBoundingClientRect()
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 }
+  })
+  await overlay.mouse.move(box.x - 4, box.y, { steps: 3 })
+  await overlay.mouse.move(box.x, box.y, { steps: 3 })
+  await overlay.waitForSelector('.pill-quick.live', { timeout: 3000 })
+  await shot('01h-pill-hover')
+  await overlay.click('.pill-quick.live')
+  await until(async () => (await helper('/state')).listening, 4000)
+  assert((await overlay.getAttribute('.island', 'data-capture')) === 'live', 'the live button did not start live talk')
+  await overlay.evaluate(() => window.watson.cancel())
+  await overlay.mouse.move(5, 700)
+  return 'two small buttons appeared on hover; the live one started a live conversation'
+})
+
 await scenario('Talk live from the dictation box', async () => {
   await setMode('review')
   try {
@@ -235,8 +278,7 @@ await scenario('Talk live from the dictation box', async () => {
     await until(async () => (await helper('/state')).listening, 4000)
     await helper('/say', { text: 'How tall is the Eiffel Tower?' })
     await overlay.waitForSelector('.draft textarea', { timeout: 8000 })
-    await overlay.click('.route')
-    await overlay.click('.draft-more button:has-text("Talk live")')
+    await overlay.click('.round-btn.live')
     await until(async () => (await spokenText()).includes('330 meters'), 10_000)
     // Live: it keeps listening for a follow-up.
     await until(async () => (await helper('/state')).listening, 10_000)
@@ -379,9 +421,9 @@ await scenario('Dictate, edit, then send to Claude (review mode)', async () => {
   await until(async () => (await overlay.inputValue('.draft textarea')).includes('launch'), 4000)
   await shot('08-review-draft')
   await overlay.fill('.draft textarea', 'Draft a short, upbeat tweet announcing that Watson launches this Friday.')
-  await overlay.click('.route')
+  await overlay.click('.dest-opt.current')
   await shot('09a-review-more')
-  await overlay.click('.draft-targets .chip:has-text("Claude")')
+  await overlay.click('.dest-opt:has-text("Claude")')
   await shot('09-review-edited')
   await overlay.press('.draft textarea', 'Enter')
   const sent = await until(async () => (await helper('/state')).sent[0], 10_000)
@@ -394,8 +436,8 @@ await scenario('Dictate, edit, then send to Claude (review mode)', async () => {
 await scenario('Dictate into the app you were using', async () => {
   await talk('see you at the offsite on thursday', { review: true })
   await overlay.waitForSelector('.draft textarea', { timeout: 8000 })
-  await overlay.click('.route')
-  await overlay.click('.draft-targets .chip:has-text("Type into")')
+  await overlay.click('.dest-opt.current')
+  await overlay.click('.dest-opt:has-text("TextEdit")')
   await overlay.click('.send-btn')
   const ins = await until(async () => (await helper('/state')).inserted[0], 8000)
   assert(ins.bundleId === 'com.apple.TextEdit', `inserted into ${ins.bundleId}`)
@@ -608,6 +650,28 @@ await scenario('Pass an earlier answer to another AI', async () => {
   return 'both earlier answers went along with the request, no confirmation needed'
 })
 
+await scenario('Automations: schedule one, see it in the dashboard', async () => {
+  await overlay.evaluate(() => window.watson.ask('Turn off my Mac at 11 every night'))
+  await until(async () => (await overlay.evaluate(() => document.body.innerText)).includes('Every day at 11:00 PM'), 10_000)
+  const existing = app.windows().find((w) => w.url().includes('#home'))
+  const opened = existing ? null : app.waitForEvent('window', { timeout: 10_000 })
+  await overlay.evaluate(() => window.watson.openWindow())
+  const win = existing ?? (await opened)
+  await win.waitForSelector('.home', { timeout: 10_000 })
+  await win.setViewportSize({ width: 940, height: 700 }).catch(() => {})
+  await win.click('nav button:has-text("Automations")')
+  await win.waitForSelector('.auto-row', { timeout: 5000 })
+  const row = await win.textContent('.auto-row')
+  assert(row.includes('Shut down') && row.includes('Every day at 11:00 PM'), `row: ${row}`)
+  await sleep(300)
+  await win.screenshot({ path: path.join(shots, '27c-window-automations.png') })
+  await win.click('.auto-row .toggle')
+  await until(async () => (await win.$('.auto-row.off')) !== null, 3000)
+  await win.click('.auto-row .row-icon')
+  await until(async () => (await win.$('.auto-row')) === null, 3000)
+  return 'created by voice, shown under Automations, turned off and deleted from the dashboard'
+})
+
 await scenario('Watson window: chat history and hand-offs', async () => {
   // It may already be open: a confirmation earlier ("send") brings it forward on its own.
   const existing = app.windows().find((w) => w.url().includes('#home'))
@@ -616,6 +680,7 @@ await scenario('Watson window: chat history and hand-offs', async () => {
   const win = existing ?? (await opened)
   await win.waitForSelector('.home', { timeout: 10_000 })
   await win.setViewportSize({ width: 940, height: 700 }).catch(() => {})
+  await win.click('nav button:has-text("Conversation")')
   await win.waitForSelector('.bubble.you', { timeout: 10_000 })
   const you = await win.$$eval('.bubble.you', (els) => els.length)
   assert(you >= 5, `only ${you} requests in the history`)

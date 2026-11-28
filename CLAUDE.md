@@ -99,9 +99,16 @@
   chosen gender (its most natural voice, any accent if the region has none). Settings plays a sample on change.
 - `muted` (setting, `ui:setMuted`): `say()` sends nothing and expands the panel; `speakText` then calls
   `afterSpeech` itself. Muting mid-speech stops it.
-- Dictation UI (`mode: 'dictate'` in Overlay.tsx): while listening only the words (`.dictation`); a click
-  calls `takeOver` (mic off, words kept in the draft). After: textarea + `.route` button + Discard/Send; the
-  `.route` button opens `.draft-more` (destinations, Keep talking, Talk live). Typing uses the same draft.
+- Dictation UI (`mode: 'dictate'` in Overlay.tsx): while listening only the words (`.dictation`, plus
+  `LiveSwitch`); a click calls `takeOver` (mic off, words kept in the draft). After: `.composer` = textarea +
+  bar: `.dest-opt.current` (opens the destination row in place, so nothing shows twice), `.round-btn`s (keep
+  talking, `.live`, Discard) and `.send-round`. Typing uses the same draft.
+- Live vs dictation look: `.island[data-capture]` (`live` = rainbow edge + `live-aura`, `review` = quiet
+  white edge). `LiveSwitch` flips capture while listening (`ui:setCapture`). Pill hover (`quick`, after
+  220 ms) shows `.pill-quick` dashboard (left) and live (right); the orb stays centred so clicks still talk.
+- Automations: `src/main/automations.ts` (automations.json; `nextRun`/`describeSchedule` in
+  `src/shared/schedule.ts`), brain tool `automation`, `runAutomation` in index.ts (shut down/restart/sleep
+  = one-minute `confirm` that auto-proceeds). Missed runs never run late. Dashboard tab Automations.
 - Unsent draft: synced as you type (`ui:draftText`), saved to `draft.json` (`src/main/savedDraft.ts`).
   Esc or the overlay losing focus parks it (`draftParked`): the pill shows it (tone `unsent`) and a click
   reopens it (`openDraft`). Only Discard/Send clear it. Under 20 words it expires after 12 h; 20+ never.

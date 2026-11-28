@@ -75,8 +75,8 @@ read aren't lost.
 
 | | How | What happens |
 |---|---|---|
-| **Dictate, then send** (default) | Click the circle, or ⌥ Space | While you talk, only your words show. Click them to finish by typing (the microphone stops). When you stop, **Send** (or Return) and **Discard** appear; nothing is sent before that. The **Auto** button under the text opens the choices: where it goes (Auto lets Watson answer or hand it to Claude or Grok; or pick an AI or "Type into <app>"), **Keep talking** and **Talk live**. Watson speaks the answer, then the microphone goes off. |
-| **Talk live** | **Talk live** under the dictation box's **Auto** button, ⌥⇧ Space, the right-click menu, or say **"Hey Watson"** | A spoken conversation: Watson answers as soon as you stop, you can talk over it, and it listens a few seconds for a follow-up. |
+| **Dictate, then send** (default) | Click the circle, or ⌥ Space | While you talk, only your words show. Click them to finish by typing (the microphone stops). When you stop, the text sits on the island with a small bar: **Auto ⌄** (where it goes: tap it to pick Auto, an AI or the app you were in), then icons for keep talking 🎙, talk live (waveform), discard 🗑 and send ↑ (or Return). Nothing is sent before that. The waveform button on the listening bar switches to live talk mid-sentence. Watson speaks the answer, then the microphone goes off. |
+| **Talk live** | the waveform button (beside the pill on hover, on the listening bar, or in the dictation bar), ⌥⇧ Space, the right-click menu, or say **"Hey Watson"** | A spoken conversation: Watson answers as soon as you stop, you can talk over it, and it listens a few seconds for a follow-up. |
 
 Settings → Voice swaps which one the click and ⌥ Space use. **Listen for "Hey Watson"** is off unless
 you turn it on: it listens on this Mac only (on-device speech recognition, nothing is sent anywhere),
@@ -84,6 +84,15 @@ and macOS shows the orange microphone dot while Watson is idle.
 
 Right-click the circle for: dictate, talk live, **Mute Watson**, **Open dashboard**, move or change
 shape, "Hey Watson", and Settings.
+
+**Hover the pill** to get two small buttons beside it: the dashboard (left) and live talk (right). Live talk
+glows with a moving rainbow edge; dictation has a quiet white one, so you can tell them apart.
+
+**Dashboard** (Conversation, AI agents, Widgets, **Automations**). Automations lists what Watson does on
+its own at set times ("turn off my Mac at 11 every night", "open Slack at 9 on weekdays", "dark mode at
+7 pm"), plus running timers and alarms; each can be turned off or deleted there. Shut down, restart and
+sleep give a one-minute warning you can cancel. Watson must be running for them to happen; ones missed
+while it was closed don't run late.
 
 **Unsent words are never lost.** Clicking away from the box or pressing Esc puts the message in the pill
 (it shows its first words); click the pill to get it back. Only **Discard** deletes it. It's saved on

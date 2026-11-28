@@ -27,6 +27,8 @@ import { createNote, notesForModel, readNote, recentNotes, searchNotes } from '.
 import { clockForModel, worldClock } from './tools/clock'
 import { battery } from './tools/battery'
 import { spokenDuration, timerName, timers } from './timers'
+import { automations } from './automations'
+import { describeSchedule } from '@shared/schedule'
 
 export const HAIKU = 'claude-haiku-5-5'
 export const SONNET = 'claude-sonnet-5-5'
@@ -105,6 +107,17 @@ const MacInput = z.object({
 const CompleteReminderInput = z.object({ title: z.string().min(1) })
 const MemoryInput = z.object({ action: z.enum(['remember', 'forget', 'list']), text: z.string().optional() })
 const FindInput = z.object({ query: z.string().min(1) })
+const AutomationInput = z.object({
+  action: z.enum(['create', 'list', 'delete']),
+  do: z.enum(['shut_down', 'restart', 'sleep', 'sleep_display', 'dark_mode', 'light_mode', 'mute', 'volume', 'open_app', 'quit_app', 'announce']).optional(),
+  value: z.string().optional(),
+  time: z.string().optional(),
+  date: z.string().optional(),
+  repeat: z.enum(['once', 'daily', 'weekdays', 'weekends']).optional(),
+  label: z.string().optional(),
+  target: z.string().optional(),
+})
+
 const TimerInput = z.object({
   action: z.enum(['start', 'alarm', 'list', 'cancel']),
   seconds: z.number().optional(),
@@ -254,6 +267,25 @@ function toolDefs(settings: Settings): Anthropic.Beta.BetaToolUnion[] {
       },
     },
     {
+      name: 'automation',
+      description:
+        'Things Watson does on its own at a set time, once or on a schedule ("turn off my Mac at 11 pm every night", "dark mode at sunset 7pm on weekdays", "open Spotify at 8 tomorrow"). They show in the dashboard under Automations. create: do + time ("HH:mm", 24 h) + repeat (once/daily/weekdays/weekends; once may take date "YYYY-MM-DD", otherwise the next time it comes round) + value (app name for open_app/quit_app, 0-100 for volume, the words for announce) + label?. list. delete: target = label words, id or "all". Shut down, restart and sleep show a one-minute warning the user can cancel.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          action: { type: 'string', enum: ['create', 'list', 'delete'] },
+          do: { type: 'string', enum: ['shut_down', 'restart', 'sleep', 'sleep_display', 'dark_mode', 'light_mode', 'mute', 'volume', 'open_app', 'quit_app', 'announce'] },
+          value: { type: 'string' },
+          time: { type: 'string', description: 'Local time HH:mm (24 h)' },
+          date: { type: 'string', description: 'YYYY-MM-DD, only for a one-off on a specific day' },
+          repeat: { type: 'string', enum: ['once', 'daily', 'weekdays', 'weekends'] },
+          label: { type: 'string' },
+          target: { type: 'string', description: 'For delete' },
+        },
+        required: ['action'],
+      },
+    },
+    {
       name: 'mac',
       description:
         'Control this Mac: volume (level 0-100), volume_up / volume_down (level = step, default 15), mute, unmute, dark_mode, light_mode, toggle_appearance, sleep_display (also locks if a password is required on wake).',
@@ -366,6 +398,7 @@ function systemPrompt(settings: Settings, spoken: boolean): string {
     'For "good morning", "brief me" or "how does my day look": call get_weather, get_calendar (today) and get_reminders together, then give a warm 2–3 sentence briefing. Never correct the user\'s greeting or the time of day; focus on what is still ahead today.',
     'Use memory to remember things only when the user asks you to remember or note something about themselves; to answer "where did I park" and similar, use what you remember.',
     'Timers and alarms ("set a timer for 10 minutes", "wake me at 7") use the timer tool; confirm the length or time in a few words.',
+    'Doing something on the Mac at a set time or on a schedule ("turn off my computer at 11", "every weekday at 9 open Slack") uses the automation tool; repeat back what and when.',
     'When the user wants something kept on screen ("pin", "keep it up", "put it on my other screen"), use pin_widget.',
     'Calendar events and reminders you add take effect right away: repeat back what you added.',
     'Use delegate for coding, website changes, email, calendar, documents and anything needing the user\'s connectors. Then say in a few words that you handed it off.',
@@ -763,6 +796,25 @@ export class Brain {
           host.finishActivity(a, false)
           throw e
         }
+      }
+      case 'automation': {
+        const a = AutomationInput.parse(input)
+        const show = () =>
+          host.addBlocks([{ type: 'list', items: automations.list().map((x) => ({ title: x.label, detail: describeSchedule(x.time, x.repeat, x.nextAt), meta: x.enabled ? '' : 'Off' })) }], { title: 'Automations' })
+        if (a.action === 'create') {
+          if (!a.do || !a.time) throw new Error('An automation needs what to do and a time.')
+          const item = automations.add({ action: a.do, value: a.value, time: a.time, date: a.date, repeat: a.repeat ?? 'once', label: a.label })
+          show()
+          return `Created "${item.label}": ${describeSchedule(item.time, item.repeat, item.nextAt)}. Watson must be running for it to happen.`
+        }
+        if (a.action === 'delete') {
+          const gone = automations.remove(a.target ?? '')
+          if (automations.list().length) show()
+          return gone.length ? `Deleted ${gone.map((g) => `"${g.label}"`).join(', ')}.` : 'No automation matched.'
+        }
+        const list = automations.list()
+        if (list.length) show()
+        return list.length ? list.map((x) => `${x.label}: ${describeSchedule(x.time, x.repeat, x.nextAt)}${x.enabled ? '' : ' (off)'}`).join('; ') : 'No automations yet.'
       }
       case 'timer': {
         const t = TimerInput.parse(input)

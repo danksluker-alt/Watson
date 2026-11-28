@@ -40,6 +40,59 @@ export const Speaker = ({ size, off, ...p }: P & { off?: boolean }) => (
   </svg>
 )
 
+/** Live talk: a small waveform. */
+export const Wave = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p} stroke="currentColor" strokeWidth={2.1} strokeLinecap="round">
+    <path d="M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4" />
+  </svg>
+)
+
+export const Grid = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p} stroke="currentColor" strokeWidth={1.9} strokeLinejoin="round">
+    <rect x="4" y="4" width="6.5" height="6.5" rx="1.8" />
+    <rect x="13.5" y="4" width="6.5" height="6.5" rx="1.8" />
+    <rect x="4" y="13.5" width="6.5" height="6.5" rx="1.8" />
+    <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.8" />
+  </svg>
+)
+
+export const Trash = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p} stroke="currentColor" strokeWidth={1.9} strokeLinecap="round" strokeLinejoin="round">
+    <path d="M4.5 7h15M10 4h4M6.5 7l.9 12a2 2 0 0 0 2 1.8h5.2a2 2 0 0 0 2-1.8l.9-12" />
+  </svg>
+)
+
+export const Bubble = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p} stroke="currentColor" strokeWidth={1.9} strokeLinejoin="round">
+    <path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-8l-4.5 3.5V17H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z" />
+  </svg>
+)
+
+export const Bolt = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p} stroke="currentColor" strokeWidth={1.9} strokeLinejoin="round">
+    <path d="M13 3L5 13.5h6L10 21l8-10.5h-6L13 3z" />
+  </svg>
+)
+
+export const Power = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p} stroke="currentColor" strokeWidth={2} strokeLinecap="round">
+    <path d="M12 3.5v8M7 6.3a7.5 7.5 0 1 0 10 0" />
+  </svg>
+)
+
+export const Moon = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p} stroke="currentColor" strokeWidth={1.9} strokeLinejoin="round">
+    <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" />
+  </svg>
+)
+
+export const Clock = ({ size, ...p }: P) => (
+  <svg {...base(size)} {...p} stroke="currentColor" strokeWidth={1.9} strokeLinecap="round">
+    <circle cx="12" cy="12" r="8.5" />
+    <path d="M12 7.5V12l3 2" />
+  </svg>
+)
+
 export const ArrowUp = ({ size, ...p }: P) => (
   <svg {...base(size)} {...p} stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round">
     <path d="M12 19V5M6 11l6-6 6 6" />

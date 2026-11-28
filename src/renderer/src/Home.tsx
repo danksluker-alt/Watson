@@ -1,15 +1,16 @@
 // The Watson window: everything in one place. Your recent requests as a simple chat, every
 // hand-off to your other AIs with its full answer, and anything waiting for your OK on top.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { Block, CompareData, DelegationData, HistoryData, HistoryTurn, UIState } from '@shared/types'
-import { ArrowUp, Check, Warning } from './components/Icons'
+import type { AutomationItem, Block, CompareData, DelegationData, HistoryData, HistoryTurn, UIState } from '@shared/types'
+import { describeSchedule } from '@shared/schedule'
+import { ArrowUp, Bolt, Bubble, Check, Clock, Close, Gear, Grid, Mic, Moon, Power, Sparkle, Speaker, Trash, Warning } from './components/Icons'
 import { Markdown } from './components/Markdown'
 import { Orb } from './components/Orb'
 import { Blocks } from './widgets/Blocks'
 import { CompareCard } from './widgets/Compare'
 import { AgentMark } from './widgets/Delegation'
 
-type Tab = 'chat' | 'handoffs' | 'widgets'
+type Tab = 'chat' | 'handoffs' | 'widgets' | 'automations'
 type Job = DelegationData & { at: number }
 type Entry = { kind: 'job'; job: Job } | { kind: 'group'; key: string; jobs: Job[]; compare?: CompareData; at: number }
 
@@ -49,6 +50,96 @@ function recentWidgets(turns: HistoryTurn[]): WidgetEntry[] {
   }
   return out
 }
+
+function AutomationIcon({ a }: { a: AutomationItem }) {
+  switch (a.action) {
+    case 'shut_down':
+    case 'restart':
+    case 'sleep':
+      return <Power size={16} />
+    case 'sleep_display':
+    case 'dark_mode':
+      return <Moon size={16} />
+    case 'mute':
+    case 'volume':
+      return <Speaker size={16} off={a.action === 'mute'} />
+    case 'announce':
+      return <Mic size={16} />
+    default:
+      return <Bolt size={16} />
+  }
+}
+
+function Automations({ s }: { s: UIState | null }) {
+  const list = s?.automations ?? []
+  const timers = s?.timers ?? []
+  const left = (ms: number) => {
+    const m = Math.max(0, Math.round((ms - Date.now()) / 60_000))
+    return m < 60 ? `in ${m} min` : `at ${new Date(ms).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`
+  }
+  if (!list.length && !timers.length)
+    return (
+      <div className="home-empty">
+        <div className="empty-icon">
+          <Bolt size={22} />
+        </div>
+        <p>Nothing scheduled.</p>
+        <p className="muted">Try “turn off my Mac at 11 every night”.</p>
+      </div>
+    )
+  return (
+    <div className="auto-page">
+      {list.length > 0 && (
+        <section>
+          <h3 className="section-title">Scheduled</h3>
+          <div className="auto-list">
+            {list.map((a) => (
+              <div key={a.id} className={a.enabled ? 'auto-row' : 'auto-row off'}>
+                <div className={`auto-icon ${a.action}`}>
+                  <AutomationIcon a={a} />
+                </div>
+                <div className="auto-main">
+                  <div className="auto-title">{a.label}</div>
+                  <div className="auto-when">
+                    {a.enabled ? describeSchedule(a.time, a.repeat, a.nextAt) : a.repeat === 'once' && a.lastRunAt ? 'Done' : 'Off'}
+                    {a.action === 'announce' && a.value ? ` · “${a.value}”` : ''}
+                  </div>
+                </div>
+                <button role="switch" aria-checked={a.enabled} aria-label={a.enabled ? 'Turn off' : 'Turn on'} className={a.enabled ? 'toggle on' : 'toggle'} onClick={() => window.watson.setAutomationEnabled(a.id, !a.enabled)} />
+                <button className="row-icon" aria-label="Delete" title="Delete" onClick={() => window.watson.removeAutomation(a.id)}>
+                  <Trash size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+      {timers.length > 0 && (
+        <section>
+          <h3 className="section-title">Timers and alarms</h3>
+          <div className="auto-list">
+            {timers.map((t) => (
+              <div key={t.id} className="auto-row">
+                <div className="auto-icon timer">
+                  <Clock size={16} />
+                </div>
+                <div className="auto-main">
+                  <div className="auto-title">{t.label || (t.kind === 'alarm' ? 'Alarm' : 'Timer')}</div>
+                  <div className="auto-when">Goes off {left(t.endsAt)}</div>
+                </div>
+                <button className="row-icon" aria-label="Cancel" title="Cancel" onClick={() => window.watson.cancelTimer(t.id)}>
+                  <Close size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+    </div>
+  )
+}
+
+const TITLES: Record<Tab, string> = { chat: 'Conversation', handoffs: 'AI agents', widgets: 'Widgets', automations: 'Automations' }
 
 const STATUS: Record<string, string> = {
   confirming: 'Waiting for your OK',
@@ -145,26 +236,33 @@ export function HomePage() {
         <input className="home-search" placeholder="Search" value={query} onChange={(e) => setQuery(e.target.value)} />
         <nav>
           <button className={tab === 'chat' ? 'on' : ''} onClick={() => setTab('chat')}>
-            Conversation <span className="count">{h.turns.length || ''}</span>
+            <Bubble size={16} /> <span className="nav-label">Conversation</span>
           </button>
           <button className={tab === 'handoffs' ? 'on' : ''} onClick={() => setTab('handoffs')}>
-            AI agents <span className={activeJobs.length ? 'count live' : 'count'}>{activeJobs.length ? `${activeJobs.length} working` : h.jobs.length || ''}</span>
+            <Sparkle size={15} /> <span className="nav-label">AI agents</span>
+            {activeJobs.length > 0 && <span className="count live">{activeJobs.length}</span>}
           </button>
           <button className={tab === 'widgets' ? 'on' : ''} onClick={() => setTab('widgets')}>
-            Widgets <span className="count">{widgets.length || ''}</span>
+            <Grid size={15} /> <span className="nav-label">Widgets</span>
+          </button>
+          <button className={tab === 'automations' ? 'on' : ''} onClick={() => setTab('automations')}>
+            <Bolt size={15} /> <span className="nav-label">Automations</span>
+            {(s?.automations.filter((a) => a.enabled).length ?? 0) + (s?.timers.length ?? 0) > 0 && (
+              <span className="count">{(s?.automations.filter((a) => a.enabled).length ?? 0) + (s?.timers.length ?? 0)}</span>
+            )}
           </button>
         </nav>
         <div className="home-side-foot">
-          <button className="link" onClick={() => window.watson.openSettings()}>
-            Settings
+          <button className="side-link" onClick={() => window.watson.openSettings()}>
+            <Gear size={14} /> Settings
           </button>
           <button
-            className="link"
+            className="side-link"
             onClick={() => {
               if (confirm('Clear Watson’s history on this Mac? This can’t be undone.')) window.watson.clearHistory()
             }}
           >
-            Clear history
+            <Trash size={14} /> Clear history
           </button>
         </div>
       </aside>
@@ -187,7 +285,15 @@ export function HomePage() {
           </div>
         )}
 
-        {tab === 'chat' ? (
+        <header className="home-head">
+          <h2>{TITLES[tab]}</h2>
+        </header>
+
+        {tab === 'automations' ? (
+          <div className="home-scroll">
+            <Automations s={s} />
+          </div>
+        ) : tab === 'chat' ? (
           <div className="home-scroll">
             {groups.length === 0 && (
               <div className="home-empty">

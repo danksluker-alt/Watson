@@ -71,6 +71,7 @@ export function startMockApi(port) {
       const req = text.replace(/^(ask|have|tell) claude( to)?/i, '').trim().replace(/^./, (c) => c.toUpperCase())
       return { tools: [{ name: 'delegate', input: { agent: 'claude', request: req, sensitive: /email|send/.test(t) } }] }
     }
+    if (/turn off my mac at/.test(t)) return { tools: [{ name: 'automation', input: { action: 'create', do: 'shut_down', time: '23:00', repeat: 'daily' } }] }
     if (/\btimer\b/.test(t)) return { tools: [{ name: 'timer', input: { action: 'start', seconds: Number(/(\d+) second/.exec(t)?.[1] ?? 600), label: t.includes('tea') ? 'tea' : undefined } }] }
     if (t.startsWith('check off')) return { tools: [{ name: 'complete_reminder', input: { title: text.slice(10).replace(/[.?!]$/, '') } }] }
     if (t.startsWith('remember')) return { tools: [{ name: 'memory', input: { action: 'remember', text: 'Parked on level 3, spot B12' } }] }
@@ -103,6 +104,7 @@ export function startMockApi(port) {
     const r = results.map((x) => (typeof x.content === 'string' ? x.content : JSON.stringify(x.content))).join('\n')
     if (results.some((x) => x.is_error)) return `Sorry, that didn't work: ${r.slice(0, 120)}`
     const t = text.toLowerCase()
+    if (/turn off my mac at/.test(t)) return r.split(' Watson must')[0]
     if (t.startsWith('pin ') || /\btimer\b/.test(t) || t.startsWith('check off') || t.startsWith('remember') || t.includes('volume')) return r.split('. It ends')[0] + '.'
     if (/^ask (claude and grok|everyone)/.test(t)) return 'I’ve asked Claude and Grok. I’ll compare their answers when they’re in.'
     if (/^send that to claude/.test(t)) return 'I’ve passed it to Claude.'
