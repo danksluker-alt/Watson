@@ -18,6 +18,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 
 const log = { spoken: [], sent: [], inserted: [], exec: [], calendarAdds: [], reminderAdds: [], reminderDone: [], commands: [] }
 let listening = false
+/** Listening for "Hey Watson" (on-device in the real helper). */
+let waking = false
 let session = 0
 let speakQueue = []
 let speaking = false
@@ -183,8 +185,15 @@ async function handle(msg) {
   switch (cmd) {
     case 'configure':
       return reply(id)
+    case 'wake.start':
+      if (!listening) waking = true
+      return reply(id)
+    case 'wake.stop':
+      waking = false
+      return reply(id)
     case 'listen.start':
       session++
+      waking = false
       listening = true
       out({ ev: 'listening', session })
       return reply(id)
@@ -283,7 +292,13 @@ http
       res.statusCode = ok ? 200 : 409
       return res.end(JSON.stringify({ ok }))
     }
-    if (req.url === '/state') return res.end(JSON.stringify({ listening, speaking: speaking || speakQueue.length > 0, ...log }))
+    if (req.url === '/state') return res.end(JSON.stringify({ listening, waking, speaking: speaking || speakQueue.length > 0, ...log }))
+    if (req.url === '/wake') {
+      if (!waking) return res.end(JSON.stringify({ ok: false }))
+      waking = false
+      out({ ev: 'wake' })
+      return res.end(JSON.stringify({ ok: true }))
+    }
     if (req.url === '/reset') {
       for (const k of Object.keys(log)) log[k] = []
       answerScale = 1

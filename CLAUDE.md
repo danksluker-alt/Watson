@@ -77,3 +77,13 @@
   longer drop `announceQueue` (agent answers waiting to be read); only dismiss does.
 - `configure` sends the enabled agents' names as `vocabulary`; the helper adds them and "ask X"/"and X"
   phrases to the recognizer's `contextualStrings`.
+- Talking: `inputMode` (default `review`) is what a click and the main hotkey do; the second hotkey
+  (`reviewHotkey`) does the other mode. `liveTalk` in index.ts is true only for live conversations:
+  follow-up listening and listening while Watson speaks (barge-in) happen only then. Dictated requests
+  get a spoken answer and the mic goes off. `ui:talkLive` sends the draft (if any) and goes live.
+- "Hey Watson" (`wakeWord`, off by default): helper `wake.start`/`wake.stop` run an on-device-only
+  recognition session that emits `{ev:"wake"}` and nothing else (no partials, no levels), restarted
+  every 50 s, ignored while Watson speaks. `syncWake()` starts it whenever Watson is idle; any real
+  listen replaces it. If on-device recognition is missing, the setting turns itself off with a notice.
+- Right-click on the pill: native menu (`pill:menu`). Dashboard tabs: Conversation, AI agents, Widgets
+  (`recentWidgets` in Home.tsx: newest block per place/symbol/type from history turns).

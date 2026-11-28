@@ -59,8 +59,10 @@ The GitHub Actions workflows in `.github/workflows` only run when started by han
   when you let go, choose **Circle** or **Pill** (a pill that says "Watson" at rest), or **Reset** it
   to the top centre. Near an edge or
   the bottom of the screen the panel shifts or opens upward so it's never cut off.
-- **Open Watson** (the ⤢ button in the panel, or the menu-bar icon) shows your recent requests as a
-  chat, every hand-off with its full answer, and anything waiting for your OK. It comes forward on its
+- **The dashboard** (right-click the circle → Open dashboard, the ⤢ button in the panel, or the
+  menu-bar icon) has your recent requests as a chat, **AI agents** (what Claude and Grok are working on
+  and every answer and comparison), **Widgets** (the latest weather, stocks, calendar and other things
+  you asked to see), and anything waiting for your OK. It comes forward on its
   own when something needs confirming (Settings → Agents). History stays on this Mac
   (`history.json`); **Clear history** removes it.
 
@@ -73,10 +75,15 @@ read aren't lost.
 
 | | How | What happens |
 |---|---|---|
-| **Live** | ⌥ Space, then talk | Watson answers as soon as you stop. Talk over it to interrupt. It keeps listening for a few seconds for a follow-up. |
-| **Dictate & review** | ⌥⇧ Space, or tap **Review** while listening | Your words appear in an editor. Fix them, then send them to Watson, Claude, Grok or any agent, or type them into the app you were in, like a dictation tool. |
+| **Dictate, then send** (default) | Click the circle, or ⌥ Space | Your words appear in a box as you speak. Nothing is sent until you press **Send** (or Return), and you can fix the text first. **Auto** lets Watson answer or hand it to Claude or Grok (or name one: "ask Grok…"); you can also pick an AI or "Type into <app>". Watson speaks the answer, then the microphone goes off. |
+| **Talk live** | **Talk live** in the dictation box, ⌥⇧ Space, the right-click menu, or say **"Hey Watson"** | A spoken conversation: Watson answers as soon as you stop, you can talk over it, and it listens a few seconds for a follow-up. |
 
-Settings → Voice decides which of the two ⌥ Space does.
+Settings → Voice swaps which one the click and ⌥ Space use. **Listen for "Hey Watson"** is off unless
+you turn it on: it listens on this Mac only (on-device speech recognition, nothing is sent anywhere),
+and macOS shows the orange microphone dot while Watson is idle.
+
+Right-click the circle for: dictate, talk live, **Open dashboard**, move or change shape, "Hey Watson",
+and Settings.
 
 ## How it's built
 

@@ -241,6 +241,8 @@ export type Settings = {
   hotkey: string
   reviewHotkey: string
   inputMode: InputMode
+  /** Listen on this Mac for "Hey Watson" to start a live conversation. Off unless chosen. */
+  wakeWord: boolean
   sounds: boolean
   musicApp: MusicApp
   browserBundleId: string
@@ -291,6 +293,10 @@ export type WatsonAPI = {
   setInteractive: (interactive: boolean) => void
   focus: () => void
   toggleListen: () => void
+  /** Start a live voice conversation (sends the draft first, if there is one). */
+  talkLive: (draft?: string) => void
+  /** The pill's right-click menu. */
+  pillMenu: () => void
   ask: (text: string) => void
   cancel: () => void
   dismiss: () => void

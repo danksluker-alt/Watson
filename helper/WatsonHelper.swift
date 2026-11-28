@@ -90,6 +90,11 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     var endpointTimer: Timer?
     var lastLevelEmit = Locked<Double>(0)
     let isListening = Locked<Bool>(false)
+    // "Hey Watson": an on-device-only recognition session that only looks for the wake phrase.
+    // It shows nothing, sends nothing and is restarted every ~50 s. Any real listen replaces it.
+    var wakeMode = false
+    let wakeOnly = Locked<Bool>(false)
+    var wakeTimer: Timer?
     // Barge-in: the audio thread notices the user's voice while Watson talks and ducks the voice
     // at once; the first real word then stops it. Only with echo cancellation (otherwise the mic
     // hears Watson itself).
@@ -281,7 +286,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
                 if loud == 6 { DispatchQueue.main.async { [weak self] in self?.duck() } }
             }
             let now = Date().timeIntervalSince1970
-            if now - lastLevelEmit.get() > 0.05 {
+            if !wakeOnly.get() && now - lastLevelEmit.get() > 0.05 {
                 lastLevelEmit.set(now)
                 emit(["ev": "level", "value": min(1.0, Double(rms) * 12)])
             }
@@ -307,7 +312,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
 
     // MARK: Recognition
 
-    func startListening(silence: Double?) throws {
+    func startListening(silence: Double?, wake: Bool = false) throws {
         endRecognition(cancel: true)
         try checkPermissions()
         if let silence { silenceSeconds = silence }
@@ -325,6 +330,14 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         // Whole phrases help more than single words ("and Grok" was once heard as nothing).
         let phrases = names.filter { $0 != "Watson" && $0 != "Spotify" }.flatMap { ["ask \($0)", "and \($0)"] }
         req.contextualStrings = Array((names + phrases).prefix(90))
+        if wake {
+            // Never stream the room to a server: the wake phrase is listened for on this Mac only.
+            guard recognizer.supportsOnDeviceRecognition else {
+                throw NSError(domain: "watson", code: 3, userInfo: [NSLocalizedDescriptionKey: "\"Hey Watson\" needs on-device speech recognition for \(locale). Turn on Siri once (System Settings → Siri) so macOS downloads it."])
+            }
+            req.contextualStrings = ["Hey Watson", "Hi Watson", "Okay Watson", "Watson"]
+            req.addsPunctuation = false
+        }
         try ensureEngine()
         session += 1
         let sid = session
@@ -339,9 +352,42 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         }
         listening = true
         isListening.set(true)
+        wakeMode = wake
+        wakeOnly.set(wake)
         endpointTimer?.invalidate()
+        wakeTimer?.invalidate()
+        if wake {
+            // Recognition sessions don't last forever: start a fresh one now and then.
+            wakeTimer = Timer.scheduledTimer(withTimeInterval: 50, repeats: false) { [weak self] _ in self?.restartWake(sid) }
+            return
+        }
         endpointTimer = Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in self?.checkEndpoint() }
         emit(["ev": "listening", "session": sid])
+    }
+
+    func startWake() {
+        if listening { return } // a real listen (or the wake session itself) is already running
+        do { try startListening(silence: nil, wake: true) } catch {
+            emit(["ev": "error", "message": error.localizedDescription])
+        }
+    }
+
+    func restartWake(_ sid: Int) {
+        guard sid == session, wakeMode else { return }
+        endRecognition(cancel: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in self?.startWake() }
+    }
+
+    static let wakePhrase = try! NSRegularExpression(pattern: "\\b(hey|hi|okay|ok|hello)[ ,]+watson\\b", options: [.caseInsensitive])
+
+    func onWakeResult(_ sid: Int, text: String?, isFinal: Bool, error: String?) {
+        // Watson's own voice saying its name must not wake it.
+        if let text, !isSpeaking, Voice.wakePhrase.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil {
+            endRecognition(cancel: true)
+            emit(["ev": "wake"])
+            return
+        }
+        if isFinal || error != nil { restartWake(sid) }
     }
 
     /// Lower Watson's voice the moment the user starts talking over it; restore it if no words follow.
@@ -363,6 +409,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
 
     func onResult(_ sid: Int, text: String?, isFinal: Bool, error: String?) {
         guard sid == session, listening else { return }
+        if wakeMode { return onWakeResult(sid, text: text, isFinal: isFinal, error: error) }
         if let text, !text.isEmpty, text != lastText {
             if isSpeaking {
                 // Ignore what is probably our own voice leaking in; stop only for real new words.
@@ -421,6 +468,10 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     func endRecognition(cancel: Bool) {
         endpointTimer?.invalidate()
         endpointTimer = nil
+        wakeTimer?.invalidate()
+        wakeTimer = nil
+        wakeMode = false
+        wakeOnly.set(false)
         if let req = request.get() { req.endAudio() }
         request.set(nil)
         if cancel { task?.cancel() } else { task?.finish() }
@@ -1252,6 +1303,12 @@ func handle(_ msg: [String: Any]) {
         reply(id)
     case "listen.cancel":
         voice.endRecognition(cancel: true)
+        reply(id)
+    case "wake.start":
+        voice.startWake()
+        reply(id)
+    case "wake.stop":
+        if voice.wakeMode { voice.endRecognition(cancel: true) }
         reply(id)
     case "speak":
         voice.speak(id: msg["speakId"] as? String ?? UUID().uuidString, text: msg["text"] as? String ?? "")

@@ -3271,3 +3271,41 @@ html[data-view='home'] body {
   background: none;
   box-shadow: none;
 }
+
+.live-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #30d158;
+  box-shadow: 0 0 8px rgba(48, 209, 88, 0.7);
+}
+
+/* ---- Dashboard: recent widgets ---- */
+
+.widget-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.widget-tile {
+  min-width: 0;
+}
+
+.widget-tile-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 4px 6px;
+}
+
+.widget-tile-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--label-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}

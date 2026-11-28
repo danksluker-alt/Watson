@@ -33,7 +33,9 @@ function unitsFromLocale(): 'C' | 'F' {
 export const DEFAULT_SETTINGS: Settings = {
   hotkey: 'Alt+Space',
   reviewHotkey: 'Alt+Shift+Space',
-  inputMode: 'live',
+  // Click or ⌥Space opens dictation: nothing is sent until you press Send.
+  inputMode: 'review',
+  wakeWord: false,
   sounds: true,
   musicApp: 'spotify',
   browserBundleId: '',

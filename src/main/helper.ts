@@ -13,6 +13,7 @@ export type HelperEvent =
   | { ev: 'nospeech'; session: number }
   | { ev: 'level'; value: number }
   | { ev: 'bargein' }
+  | { ev: 'wake' }
   | { ev: 'speak.start'; id: string }
   | { ev: 'speak.idle'; stopped?: boolean }
   | { ev: 'error'; message: string }

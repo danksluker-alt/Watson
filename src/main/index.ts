@@ -290,17 +290,18 @@ function buildTrayMenu() {
   const s = getSettings()
   tray.setContextMenu(
     Menu.buildFromTemplate([
-      { label: `Talk to Watson    ${keyLabel(s.hotkey)}`, click: () => onHotkey('live') },
-      { label: `Dictate & review    ${keyLabel(s.reviewHotkey)}`, click: () => onHotkey('review') },
+      { label: `Dictate, then send    ${keyLabel(s.inputMode === 'review' ? s.hotkey : s.reviewHotkey)}`, click: () => onHotkey('review') },
+      { label: `Talk live    ${keyLabel(s.inputMode === 'live' ? s.hotkey : s.reviewHotkey)}`, click: () => onHotkey('live') },
+      { label: 'Listen for “Hey Watson”', type: 'checkbox', checked: s.wakeWord, click: () => setSettings({ wakeWord: !getSettings().wakeWord }) },
       { type: 'separator' },
       {
-        label: 'When I press the main shortcut',
+        label: 'When I click Watson or press ' + keyLabel(s.hotkey),
         submenu: [
-          { label: 'Answer right away (live)', type: 'radio', checked: s.inputMode === 'live', click: () => setSettings({ inputMode: 'live' }) },
-          { label: 'Show my words to edit first (review)', type: 'radio', checked: s.inputMode === 'review', click: () => setSettings({ inputMode: 'review' }) },
+          { label: 'Dictate, then send (recommended)', type: 'radio', checked: s.inputMode === 'review', click: () => setSettings({ inputMode: 'review' }) },
+          { label: 'Talk live', type: 'radio', checked: s.inputMode === 'live', click: () => setSettings({ inputMode: 'live' }) },
         ],
       },
-      { label: 'Open Watson', click: () => openWindow() },
+      { label: 'Open dashboard', click: () => openWindow() },
       { label: 'New conversation', click: () => { brain.resetConversation(); dismiss() } },
       { label: 'Remove pinned widgets', enabled: pinned.list().length > 0, click: () => { pinned.removeKind('all'); buildTrayMenu() } },
       { type: 'separator' },
@@ -345,6 +346,7 @@ function setSettings(patch: Partial<Settings>): Settings {
   configureHelper(next)
   syncFromSettings(next)
   if ('pillPlace' in patch) placeOverlay()
+  if (next.wakeWord !== prev.wakeWord) syncWake()
   if (next.pillShape !== store.state.pillShape) store.set({ pillShape: next.pillShape })
   buildTrayMenu()
   return next
@@ -356,14 +358,13 @@ function registerHotkeys() {
   globalShortcut.unregisterAll()
   const s = getSettings()
   const bad: string[] = []
-  for (const [accel, mode] of [
-    [s.hotkey, s.inputMode],
-    [s.reviewHotkey, 'review'],
-  ] as const) {
+  const other = (m: InputMode): InputMode => (m === 'review' ? 'live' : 'review')
+  for (const accel of [s.hotkey, s.reviewHotkey]) {
     if (!accel) continue
     try {
-      // The main shortcut follows the chosen mode at the moment it's pressed.
-      const ok = globalShortcut.register(accel, () => onHotkey(accel === s.hotkey ? getSettings().inputMode : mode))
+      // The main shortcut uses the chosen mode; the second one, the other mode. Both are read
+      // when pressed, so changing the mode in Settings takes effect at once.
+      const ok = globalShortcut.register(accel, () => onHotkey(accel === s.hotkey ? getSettings().inputMode : other(getSettings().inputMode)))
       if (!ok) bad.push(accel)
     } catch {
       bad.push(accel)
@@ -380,6 +381,8 @@ let responding = false
 let speakingActive = false
 let listening = false
 let inputMode: 'voice' | 'text' = 'voice'
+/** A live voice conversation is going on (follow-up listening, talking over Watson). Off for dictation. */
+let liveTalk = false
 let speakSeq = 0
 let draftSeq = 0
 let turnPanel: Panel | null = null
@@ -444,6 +447,7 @@ function goIdle() {
   clearTimer('noSpeech')
   clearTimer('followUp')
   store.set({ phase: 'idle', transcript: '', capture: store.state.draft ? 'review' : getSettings().inputMode })
+  liveTalk = false
   armCollapse()
   // An agent's answer that arrived while Watson was busy is read out now.
   const next = !store.state.draft && helper.ready ? announceQueue.shift() : undefined
@@ -451,7 +455,17 @@ function goIdle() {
     inputMode = 'voice'
     store.set({ phase: 'thinking', reply: next })
     speakText(next)
+    return
   }
+  syncWake()
+}
+
+/** "Hey Watson" listens only while Watson is idle; any real listening takes over the mic. */
+function syncWake() {
+  const s = getSettings()
+  const want = s.wakeWord && helper.ready && store.state.phase === 'idle' && !listening && !speakingActive && !store.state.draft && !store.state.confirm
+  if (want) helper.send('wake.start')
+  else if (!s.wakeWord) helper.send('wake.stop')
 }
 
 function armCollapse() {
@@ -471,6 +485,8 @@ function afterSpeech() {
     return
   }
   if (inputMode !== 'voice') return goIdle()
+  // Dictated requests get their answer and that's it: no listening to the room afterwards.
+  if (!liveTalk && !store.state.confirm) return goIdle()
   // Don't keep chaining on things that weren't addressed with the key (side talk).
   if (unpromptedRun >= MAX_UNPROMPTED && !store.state.confirm) return goIdle()
   // Conversation mode: keep listening briefly for a follow-up.
@@ -498,6 +514,11 @@ function onHelperEvent(e: HelperEvent) {
       store.set({ helperReady: true })
       configureHelper(getSettings())
       void maybeRequestPermissions()
+      setTimeout(syncWake, 1500)
+      break
+    case 'wake':
+      console.log('[watson] heard “Hey Watson”')
+      if (store.state.phase === 'idle' && !store.state.draft) onHotkey('live')
       break
     case 'level':
       liveOverlay()?.webContents.send('level', e.value)
@@ -533,7 +554,8 @@ function onHelperEvent(e: HelperEvent) {
     case 'speak.start':
       speakingActive = true
       if (store.state.phase !== 'speaking') store.set({ phase: 'speaking' })
-      if (!listening) startListening('watch') // so you can interrupt
+      // In a live conversation you can talk over Watson; after a dictated request the mic stays off.
+      if (!listening && liveTalk) startListening('watch')
       break
     case 'speak.idle':
       console.log(`[watson] finished speaking${e.stopped ? ' (stopped)' : ''}`)
@@ -542,6 +564,13 @@ function onHelperEvent(e: HelperEvent) {
       break
     case 'error':
       console.error('[helper] error:', e.message)
+      if (/Hey Watson/.test(e.message)) {
+        // Can't listen for the wake phrase on this Mac: say so once and turn it off.
+        updateSettings({ wakeWord: false })
+        store.set({ notice: e.message })
+        buildTrayMenu()
+        break
+      }
       store.set({ error: e.message })
       break
   }
@@ -731,6 +760,7 @@ function onHotkey(mode: InputMode) {
       // Remember the app you were in, so dictation can be typed back into it.
       void rememberInsertTarget()
       store.set({ capture: store.state.draft ? 'review' : mode })
+      liveTalk = store.state.capture === 'live'
       return startListening('fresh')
     case 'listening':
       return store.state.transcript ? stopListening(false) : stopListening(true)
@@ -747,6 +777,7 @@ function onHotkey(mode: InputMode) {
       responding = false
       helper.send('speak.stop')
       store.set({ capture: mode })
+      liveTalk = mode === 'live'
       return startListening('fresh')
   }
 }
@@ -780,6 +811,7 @@ async function submitDraft(text: string, target: string) {
   const t = text.trim()
   store.set({ draft: null, capture: getSettings().inputMode })
   if (!t) return goIdle()
+  liveTalk = false
   if (target === 'watson') return handleUtterance(t, helper.ready ? 'voice' : 'text')
   if (target === 'insert') {
     const to = store.state.insertTarget
@@ -984,6 +1016,27 @@ function registerIpc() {
     placeOverlay()
   })
   ipcMain.on('pill:arranging', (_e, on: boolean) => store.set({ arranging: Boolean(on) }))
+  ipcMain.on('ui:talkLive', (_e, draft: string) => {
+    const text = String(draft ?? '').trim().slice(0, 8000)
+    if (listening) helper.send('listen.cancel')
+    listening = false
+    store.set({ draft: null, error: null, capture: 'live' })
+    liveTalk = true
+    if (text) return void handleUtterance(text, 'voice')
+    startListening('fresh')
+  })
+  ipcMain.on('pill:menu', () => {
+    const s = getSettings()
+    Menu.buildFromTemplate([
+      { label: `Dictate, then send    ${keyLabel(s.inputMode === 'review' ? s.hotkey : s.reviewHotkey)}`, click: () => onHotkey('review') },
+      { label: `Talk live    ${keyLabel(s.inputMode === 'live' ? s.hotkey : s.reviewHotkey)}`, click: () => onHotkey('live') },
+      { type: 'separator' },
+      { label: 'Open dashboard', click: () => openWindow() },
+      { label: 'Move or change shape…', click: () => store.set({ arranging: true }) },
+      { label: 'Listen for “Hey Watson”', type: 'checkbox', checked: s.wakeWord, click: () => setSettings({ wakeWord: !getSettings().wakeWord }) },
+      { label: 'Settings…', click: () => openSettings() },
+    ]).popup({ window: liveOverlay() ?? undefined })
+  })
   ipcMain.on('timer:cancel', (_e, id: string) => timerStore.cancel(String(id)))
   ipcMain.on('timer:stopRinging', () => stopRinging())
   ipcMain.on('ui:confirm', (_e, id: string, ok: boolean) => confirms.get(id)?.(Boolean(ok)))
@@ -991,7 +1044,10 @@ function registerIpc() {
   ipcMain.on('ui:openExternal', (_e, url: string) => {
     if (/^https?:\/\//.test(url)) void shell.openExternal(url)
   })
-  ipcMain.on('ui:setCapture', (_e, mode: InputMode) => store.set({ capture: mode === 'review' ? 'review' : 'live' }))
+  ipcMain.on('ui:setCapture', (_e, mode: InputMode) => {
+    store.set({ capture: mode === 'review' ? 'review' : 'live' })
+    liveTalk = mode !== 'review'
+  })
   ipcMain.on('ui:dictate', (_e, text: string) => {
     // Keep the user's edits, then listen for more words to add.
     store.set({ draft: { id: store.state.draft?.id ?? ++draftSeq, text: String(text ?? '') }, capture: 'review' })

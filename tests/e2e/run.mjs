@@ -116,6 +116,9 @@ const assert = (cond, msg) => {
 const spokenText = async () => (await helper('/state')).spoken.join(' ')
 
 console.log('Watson end-to-end scenarios')
+// Most scenarios talk live; the dictation scenarios switch to the default (dictate, then send).
+await overlay.evaluate(() => window.watson.setSettings({ inputMode: 'live' }))
+const setMode = (m) => overlay.evaluate((mode) => window.watson.setSettings({ inputMode: mode }), m)
 
 await scenario('Pill at rest', async () => {
   await overlay.mouse.move(5, 700)
@@ -128,6 +131,68 @@ await scenario('Pill at rest', async () => {
   await overlay.mouse.move(5, 700)
   await shot('01b-listening')
   await overlay.evaluate(() => window.watson.cancel())
+})
+
+await scenario('Click opens dictation: nothing is sent until Send', async () => {
+  await setMode('review')
+  try {
+    await overlay.mouse.move(5, 700)
+    await overlay.click('.pill')
+    await until(async () => (await helper('/state')).listening, 4000)
+    await helper('/say', { text: "What's the weather in Lisbon this weekend?" })
+    await overlay.waitForSelector('.draft textarea', { timeout: 8000 })
+    await until(async () => (await overlay.inputValue('.draft textarea')).includes('Lisbon'), 4000)
+    await sleep(1200)
+    assert(!(await apiRequests()).some((r) => r.text.includes('Lisbon')), 'sent before pressing Send')
+    assert(!(await helper('/state')).listening, 'still listening after the words were in')
+    assert((await overlay.textContent('.draft-targets .chip.on')).includes('Auto'), 'Auto should be the default target')
+    await shot('01c-dictation')
+    await overlay.click('.send-btn')
+    await overlay.waitForSelector('.weather', { timeout: 10_000 })
+    await until(async () => (await spokenText()).includes('Lisbon'), 10_000)
+    await until(async () => !(await helper('/state')).speaking, 15_000)
+    await sleep(800)
+    // A dictated request gets its answer, and then the mic stays off.
+    assert(!(await helper('/state')).listening, 'listened to the room after a dictated request')
+    return 'words shown to edit, nothing sent until Send; answered; no follow-up listening'
+  } finally {
+    await setMode('live')
+  }
+})
+
+await scenario('Talk live from the dictation box', async () => {
+  await setMode('review')
+  try {
+    await overlay.click('.pill')
+    await until(async () => (await helper('/state')).listening, 4000)
+    await helper('/say', { text: 'How tall is the Eiffel Tower?' })
+    await overlay.waitForSelector('.draft textarea', { timeout: 8000 })
+    await overlay.click('.draft-actions button:has-text("Talk live")')
+    await until(async () => (await spokenText()).includes('330 meters'), 10_000)
+    // Live: it keeps listening for a follow-up.
+    await until(async () => (await helper('/state')).listening, 10_000)
+    return 'the dictated words were answered out loud, then Watson listened for a follow-up'
+  } finally {
+    await overlay.evaluate(() => window.watson.cancel())
+    await setMode('live')
+  }
+})
+
+await scenario('“Hey Watson” starts a live conversation', async () => {
+  await overlay.evaluate(() => window.watson.setSettings({ wakeWord: true }))
+  try {
+    await until(async () => (await helper('/state')).waking, 6000)
+    const r = await helper('/wake', {})
+    assert(r.ok, 'wake phrase not accepted')
+    await until(async () => (await helper('/state')).listening, 4000)
+    await helper('/say', { text: 'How tall is the Eiffel Tower?' })
+    await until(async () => (await spokenText()).includes('330 meters'), 10_000)
+    return 'waited for the wake phrase while idle, then listened and answered live'
+  } finally {
+    await overlay.evaluate(() => window.watson.cancel())
+    await overlay.evaluate(() => window.watson.setSettings({ wakeWord: false }))
+    await until(async () => !(await helper('/state')).waking, 6000)
+  }
 })
 
 await scenario('Live voice: weather with widget and spoken answer', async () => {
@@ -442,7 +507,13 @@ await scenario('Watson window: chat history and hand-offs', async () => {
   assert(you >= 5, `only ${you} requests in the history`)
   await sleep(400)
   await win.screenshot({ path: path.join(shots, '27-window-chat.png') })
-  await win.click('nav button:has-text("Hand-offs")')
+  await win.click('nav button:has-text("Widgets")')
+  await win.waitForSelector('.widget-tile', { timeout: 5000 })
+  const tiles = await win.$$eval('.widget-tile', (els) => els.length)
+  assert(tiles >= 4, `only ${tiles} recent widgets`)
+  await sleep(400)
+  await win.screenshot({ path: path.join(shots, '27b-window-widgets.png') })
+  await win.click('nav button:has-text("AI agents")')
   await win.waitForSelector('.job-card', { timeout: 5000 })
   const agents = await win.$$eval('.job-agent', (els) => els.map((e) => e.textContent))
   assert(agents.some((a) => a.includes('Grok')) && agents.some((a) => a.includes('Claude')), `hand-offs: ${agents.join(' | ')}`)

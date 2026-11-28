@@ -123,7 +123,7 @@ function DraftEditor({ s }: { s: UIState }) {
     if (!text.trim()) return
     window.watson.submitDraft(text, to)
   }
-  const label = to === 'watson' ? 'Ask Watson' : to === 'insert' ? `Type into ${appName(s)}` : `Send to ${s.agents.find((a) => a.id === to)?.name}`
+  const label = to === 'watson' ? 'Send' : to === 'insert' ? `Type into ${appName(s)}` : `Send to ${s.agents.find((a) => a.id === to)?.name}`
 
   return (
     <div className="draft">
@@ -144,8 +144,8 @@ function DraftEditor({ s }: { s: UIState }) {
         {listening && <div className={s.transcript ? 'draft-live' : 'draft-live placeholder'}>{s.transcript || 'Listening…'}</div>}
       </div>
       <div className="draft-targets">
-        <button className={to === 'watson' ? 'chip on' : 'chip'} onClick={() => choose('watson')}>
-          <Sparkle size={12} /> Watson
+        <button className={to === 'watson' ? 'chip on' : 'chip'} onClick={() => choose('watson')} title="Watson answers, or hands it to Claude or Grok when that's better (or when you name one)">
+          <Sparkle size={12} /> Auto
         </button>
         {s.agents.map((a) => (
           <button key={a.id} className={to === a.id ? 'chip on' : 'chip'} onClick={() => choose(a.id)}>
@@ -160,6 +160,10 @@ function DraftEditor({ s }: { s: UIState }) {
         <button className={listening ? 'mic-btn live' : 'mic-btn'} onClick={() => window.watson.dictate(text)} aria-label={listening ? 'Stop dictating' : 'Keep talking'}>
           <Mic size={15} />
           <span>{listening ? 'Done' : 'Keep talking'}</span>
+        </button>
+        <button className="mic-btn" onClick={() => window.watson.talkLive(to === 'watson' ? text : '')} title="Start a live voice conversation: Watson answers out loud and keeps listening">
+          <span className="live-dot" />
+          <span>Talk live</span>
         </button>
         <span className="draft-count">{text.trim() ? `${text.trim().split(/\s+/).length} words` : ''}</span>
         <button className="btn ghost" onClick={() => window.watson.cancelDraft()}>
@@ -277,13 +281,13 @@ export function Overlay() {
                 {...hold.handlers}
                 onContextMenu={(e) => {
                   e.preventDefault()
-                  window.watson.setArranging(true)
+                  window.watson.pillMenu()
                 }}
                 initial={{ opacity: 0, filter: 'blur(6px)' }}
                 animate={{ opacity: 1, filter: 'blur(0px)' }}
                 exit={{ opacity: 0, filter: 'blur(6px)' }}
                 transition={{ duration: 0.18 }}
-                title="Click to talk · hold to move"
+                title="Click to dictate · right-click for more · hold to move"
               >
                 <Orb phase={shown?.tone === 'job' ? 'thinking' : 'idle'} size={circle ? 22 : 18} />
                 {!circle && (
@@ -321,7 +325,7 @@ export function Overlay() {
                 <div className="compact-text">
                   {s.phase === 'listening' && (
                     <div className={s.transcript ? 'transcript' : 'transcript placeholder'}>
-                      {s.transcript || (s.capture === 'review' ? 'Dictate — you’ll review before sending' : 'Listening…')}
+                      {s.transcript || (s.capture === 'review' ? 'Speak — nothing is sent until you press Send' : 'Listening… (live conversation)')}
                     </div>
                   )}
                   {s.phase === 'thinking' && (

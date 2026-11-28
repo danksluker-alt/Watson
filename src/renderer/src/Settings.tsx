@@ -210,18 +210,21 @@ export function SettingsPage() {
         <Row label="Talk shortcut" hint="e.g. Alt+Space, Command+Shift+Space">
           <input className="text" defaultValue={s.hotkey} onBlur={(e) => e.target.value.trim() && save({ hotkey: e.target.value.trim() })} />
         </Row>
-        <Row label="Dictate & review shortcut" hint="Your words appear in the pill to edit before sending">
-          <input className="text" defaultValue={s.reviewHotkey} onBlur={(e) => e.target.value.trim() && save({ reviewHotkey: e.target.value.trim() })} />
-        </Row>
-        <Row label="When I use the talk shortcut" hint={s.inputMode === 'live' ? 'Watson answers as soon as you stop talking' : 'You see and edit your words first'}>
+        <Row label="When I click Watson or use the talk shortcut" hint={s.inputMode === 'review' ? 'Your words appear in a box; nothing is sent until you press Send' : 'Watson answers out loud as soon as you stop, and keeps listening for a moment'}>
           <div className="segmented light">
-            <button className={s.inputMode === 'live' ? 'on' : ''} onClick={() => save({ inputMode: 'live' })}>
-              Answer live
-            </button>
             <button className={s.inputMode === 'review' ? 'on' : ''} onClick={() => save({ inputMode: 'review' })}>
-              Let me review
+              Dictate, then send
+            </button>
+            <button className={s.inputMode === 'live' ? 'on' : ''} onClick={() => save({ inputMode: 'live' })}>
+              Talk live
             </button>
           </div>
+        </Row>
+        <Row label={s.inputMode === 'review' ? 'Talk live shortcut' : 'Dictate shortcut'} hint="The other way of talking, on its own shortcut">
+          <input className="text" defaultValue={s.reviewHotkey} onBlur={(e) => e.target.value.trim() && save({ reviewHotkey: e.target.value.trim() })} />
+        </Row>
+        <Row label="Listen for “Hey Watson”" hint="Say it to start a live conversation. Listens on this Mac only, so the orange microphone dot stays on while Watson is idle.">
+          <Toggle on={s.wakeWord} onChange={(v) => save({ wakeWord: v })} />
         </Row>
         <Row label="Sounds" hint="Soft chimes when Watson listens and answers">
           <Toggle on={s.sounds} onChange={(v) => save({ sounds: v })} />

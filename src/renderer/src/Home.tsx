@@ -1,7 +1,7 @@
 // The Watson window: everything in one place. Your recent requests as a simple chat, every
 // hand-off to your other AIs with its full answer, and anything waiting for your OK on top.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { CompareData, DelegationData, HistoryData, HistoryTurn, UIState } from '@shared/types'
+import type { Block, CompareData, DelegationData, HistoryData, HistoryTurn, UIState } from '@shared/types'
 import { ArrowUp, Check, Warning } from './components/Icons'
 import { Markdown } from './components/Markdown'
 import { Orb } from './components/Orb'
@@ -9,7 +9,7 @@ import { Blocks } from './widgets/Blocks'
 import { CompareCard } from './widgets/Compare'
 import { AgentMark } from './widgets/Delegation'
 
-type Tab = 'chat' | 'handoffs'
+type Tab = 'chat' | 'handoffs' | 'widgets'
 type Job = DelegationData & { at: number }
 type Entry = { kind: 'job'; job: Job } | { kind: 'group'; key: string; jobs: Job[]; compare?: CompareData; at: number }
 
@@ -23,6 +23,31 @@ function dayLabel(ms: number): string {
   if (d.toDateString() === today.toDateString()) return 'Today'
   if (d.toDateString() === y.toDateString()) return 'Yesterday'
   return d.toLocaleDateString([], { weekday: 'long', month: 'short', day: 'numeric' })
+}
+
+/** One card per thing you looked at: the newest weather per place, stock per symbol, and so on. */
+function widgetKey(b: Block, title?: string): string {
+  if (b.type === 'weather') return `weather:${b.data.place}`
+  if (b.type === 'stock') return `stock:${b.data.symbol}`
+  if (b.type === 'compare') return `compare:${b.data.groupId}`
+  return `${b.type}:${title ?? ''}`
+}
+
+type WidgetEntry = { key: string; at: number; title?: string; you: string; block: Block }
+
+function recentWidgets(turns: HistoryTurn[]): WidgetEntry[] {
+  const seen = new Set<string>()
+  const out: WidgetEntry[] = []
+  for (const t of [...turns].reverse()) {
+    for (const b of t.blocks ?? []) {
+      if (b.type === 'text' || b.type === 'delegation') continue
+      const key = widgetKey(b, t.title)
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push({ key, at: t.at, title: t.title, you: t.you, block: b })
+    }
+  }
+  return out
 }
 
 const STATUS: Record<string, string> = {
@@ -60,6 +85,11 @@ export function HomePage() {
   }, [h.turns, query])
   const jobs = useMemo(() => [...h.jobs].reverse().filter((j) => !query || `${j.agent} ${j.prompt} ${j.summary ?? ''}`.toLowerCase().includes(query.toLowerCase())), [h.jobs, query])
   const activeJobs = (s?.jobs ?? []).filter((j) => !['done', 'failed'].includes(j.status))
+  const widgets = useMemo(() => {
+    const q = query.trim().toLowerCase()
+    const all = recentWidgets(h.turns)
+    return q ? all.filter((w) => `${w.title ?? ''} ${w.you} ${w.block.type}`.toLowerCase().includes(q)) : all
+  }, [h.turns, query])
   // Questions asked to several AIs at once show as one comparison.
   const entries = useMemo(() => {
     const out: Entry[] = []
@@ -110,7 +140,10 @@ export function HomePage() {
             Conversation <span className="count">{h.turns.length || ''}</span>
           </button>
           <button className={tab === 'handoffs' ? 'on' : ''} onClick={() => setTab('handoffs')}>
-            Hand-offs <span className={activeJobs.length ? 'count live' : 'count'}>{activeJobs.length || h.jobs.length || ''}</span>
+            AI agents <span className={activeJobs.length ? 'count live' : 'count'}>{activeJobs.length ? `${activeJobs.length} working` : h.jobs.length || ''}</span>
+          </button>
+          <button className={tab === 'widgets' ? 'on' : ''} onClick={() => setTab('widgets')}>
+            Widgets <span className="count">{widgets.length || ''}</span>
           </button>
         </nav>
         <div className="home-side-foot">
@@ -189,6 +222,27 @@ export function HomePage() {
               </div>
             )}
             <div ref={bottom} />
+          </div>
+        ) : tab === 'widgets' ? (
+          <div className="home-scroll">
+            {widgets.length === 0 && (
+              <div className="home-empty">
+                <p>{query ? 'Nothing matches that search.' : 'Weather, stocks, your calendar, comparisons and other things you ask to see collect here.'}</p>
+              </div>
+            )}
+            <div className="widget-grid">
+              {widgets.map((w) => (
+                <div key={w.key} className="widget-tile">
+                  <div className="widget-tile-head">
+                    <span className="widget-tile-title">{w.title ?? w.you}</span>
+                    <span className="stamp">
+                      {dayLabel(w.at)} · {time(w.at)}
+                    </span>
+                  </div>
+                  <Blocks blocks={[w.block]} />
+                </div>
+              ))}
+            </div>
           </div>
         ) : (
           <div className="home-scroll">
