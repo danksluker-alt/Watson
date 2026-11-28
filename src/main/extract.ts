@@ -50,11 +50,26 @@ export function cleanLines(lines: string[]): string[] {
  * into sentences: punctuation-only pieces always attach; other pieces attach when the line before
  * doesn't end a sentence and either side is a short fragment or the piece starts in lowercase.
  */
+/** Lines that are code, which must keep their own line: fences, tags, braces, statements. */
+const CODE = /^(```|~~~)|^\s{2,}\S|^[<{}[\]]|[;{}]$|=>|^(const|let|var|function|import|export|return|def|class|if|for|while|async|await|#include|SELECT|FROM)\b/
+
 export function joinInline(lines: string[]): string[] {
   const out: string[] = []
   const words = (s: string) => s.split(/\s+/).filter(Boolean).length
+  let fenced = false
+  let prevCode = false
   for (const line of lines) {
     const prev = out[out.length - 1]
+    // Code stays exactly as it is, line by line.
+    const fence = /^(```|~~~)/.test(line.trim())
+    const code = fence || fenced || CODE.test(line)
+    if (fence) fenced = !fenced
+    if (code || prevCode) {
+      out.push(line)
+      prevCode = code
+      continue
+    }
+    prevCode = false
     if (prev !== undefined) {
       if (/^[.,;:!?)\]”’"'…]+$/.test(line)) {
         out[out.length - 1] = prev + line

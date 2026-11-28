@@ -1,6 +1,7 @@
 // Stock quotes and price history. Uses Yahoo Finance's public chart endpoint
 // (no key, unofficial, for personal use) and falls back to Stooq's daily CSV.
 import type { StockData, StockRange } from '@shared/types'
+import { fetchRetry } from './net'
 
 const RANGES: Record<StockRange, { range: string; interval: string }> = {
   '1D': { range: '1d', interval: '5m' },
@@ -17,7 +18,7 @@ const UA = { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Appl
 async function fromYahoo(symbol: string, range: StockRange): Promise<StockData> {
   const r = RANGES[range]
   const url = `${YAHOO}/v8/finance/chart/${encodeURIComponent(symbol)}?range=${r.range}&interval=${r.interval}&includePrePost=false`
-  const res = await fetch(url, { headers: UA })
+  const res = await fetchRetry(url, { headers: UA })
   if (!res.ok) throw new Error(`Yahoo ${res.status}`)
   const j = (await res.json()) as {
     chart: {
@@ -54,7 +55,7 @@ async function fromYahoo(symbol: string, range: StockRange): Promise<StockData> 
 
 async function fromStooq(symbol: string, range: StockRange): Promise<StockData> {
   const s = symbol.includes('.') ? symbol.toLowerCase() : `${symbol.toLowerCase()}.us`
-  const res = await fetch(`https://stooq.com/q/d/l/?s=${encodeURIComponent(s)}&i=d`)
+  const res = await fetchRetry(`https://stooq.com/q/d/l/?s=${encodeURIComponent(s)}&i=d`)
   const csv = await res.text()
   const rows = csv.trim().split('\n').slice(1).map((l) => l.split(','))
   if (!rows.length || rows[0].length < 5) throw new Error(`I couldn't find a stock called ${symbol}.`)

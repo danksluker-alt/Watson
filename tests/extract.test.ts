@@ -89,3 +89,12 @@ test('a one-off speaker name in a new chat is still dropped via "<name> replied"
   const lines = ['You', grok.prompt, '6:40 PM', 'Nova', 'Sure, here it is.', '6:41 PM', 'Nova replied']
   assert.equal(replyFromWindows([], [{ title: 'x', busy: false, lines }], grok.prompt).reply, 'Sure, here it is.')
 })
+
+test('code lines are never glued together', () => {
+  const before = ['Claude']
+  const after = ['Claude', 'Make it shorter', 'Updated `Home.tsx`:', '```tsx', '<h1>Know your cycle.</h1>', '<Button>Start free</Button>', '```', 'Opened a pull request.']
+  assert.equal(extractReply(before, after, 'Make it shorter'), 'Updated `Home.tsx`:\n```tsx\n<h1>Know your cycle.</h1>\n<Button>Start free</Button>\n```\nOpened a pull request.')
+  // Unfenced code, as an app's screen reader text shows it.
+  const plain = ['Claude', 'Fix it', 'Use this:', 'const total = items.length;', 'return total', 'That should work.']
+  assert.equal(extractReply(before, plain, 'Fix it'), 'Use this:\nconst total = items.length;\nreturn total\nThat should work.')
+})
