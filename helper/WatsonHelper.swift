@@ -88,6 +88,12 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
     var endpointTimer: Timer?
     var lastLevelEmit = Locked<Double>(0)
     let isListening = Locked<Bool>(false)
+    // Barge-in: the audio thread notices the user's voice while Watson talks and ducks the voice
+    // at once; the first real word then stops it. Only with echo cancellation (otherwise the mic
+    // hears Watson itself).
+    let speakingNow = Locked<Bool>(false)
+    let loudFrames = Locked<Int>(0)
+    var duckedAt: Date?
 
     // Speech output (main-thread state)
     let synth = AVSpeechSynthesizer()
@@ -266,6 +272,12 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
             var sum: Float = 0
             for i in 0..<n { sum += ch[i] * ch[i] }
             let rms = sqrt(sum / Float(max(n, 1)))
+            if speakingNow.get() && engine.inputNode.isVoiceProcessingEnabled {
+                // ~130 ms of voice-level sound while Watson talks: someone is talking over it.
+                let loud = rms > 0.03 ? loudFrames.get() + 1 : 0
+                loudFrames.set(loud)
+                if loud == 6 { DispatchQueue.main.async { [weak self] in self?.duck() } }
+            }
             let now = Date().timeIntervalSince1970
             if now - lastLevelEmit.get() > 0.05 {
                 lastLevelEmit.set(now)
@@ -327,14 +339,33 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         emit(["ev": "listening", "session": sid])
     }
 
+    /// Lower Watson's voice the moment the user starts talking over it; restore it if no words follow.
+    func duck() {
+        guard isSpeaking, duckedAt == nil else { return }
+        duckedAt = Date()
+        outEngine.mainMixerNode.outputVolume = 0.18
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) { [weak self] in
+            guard let self, let at = self.duckedAt, Date().timeIntervalSince(at) >= 1.35 else { return }
+            self.unduck()
+        }
+    }
+
+    func unduck() {
+        duckedAt = nil
+        loudFrames.set(0)
+        outEngine.mainMixerNode.outputVolume = 1
+    }
+
     func onResult(_ sid: Int, text: String?, isFinal: Bool, error: String?) {
         guard sid == session, listening else { return }
         if let text, !text.isEmpty, text != lastText {
             if isSpeaking {
                 // Ignore what is probably our own voice leaking in; stop only for real new words.
+                // With echo cancellation one new word is enough; without it, two.
                 let spoken = Set(words(spokenText))
                 let novel = words(text).filter { !spoken.contains($0) }
-                if novel.count < 2 { return }
+                let needed = engine.inputNode.isVoiceProcessingEnabled ? 1 : 2
+                if novel.count < needed { return }
                 stopSpeaking(reason: "bargein")
                 emit(["ev": "bargein"])
             }
@@ -353,7 +384,27 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
 
     func checkEndpoint() {
         guard listening, !lastText.isEmpty, !isSpeaking else { return }
-        if Date().timeIntervalSince(lastChange) >= silenceSeconds { finish(session) }
+        if Date().timeIntervalSince(lastChange) >= Voice.pauseNeeded(after: lastText, base: silenceSeconds) { finish(session) }
+    }
+
+    /// Words a thought rarely ends on: after them, a pause usually means "still thinking".
+    static let unfinished: Set<String> = [
+        "and", "but", "or", "so", "because", "cause", "then", "also", "plus", "like", "um", "uh", "er", "hmm", "erm",
+        "the", "a", "an", "to", "of", "for", "with", "from", "about", "into", "in", "on", "at", "by", "my", "your",
+        "our", "their", "his", "her", "its", "this", "that", "these", "those", "is", "are", "was", "were", "be",
+        "if", "when", "where", "what", "which", "who", "how", "why", "i", "i'm", "we", "you", "it", "can", "could",
+        "would", "should", "will", "do", "does", "did", "maybe", "just", "some", "any", "more", "than", "as",
+    ]
+
+    /// How long a pause ends the user's turn: longer when the words so far sound unfinished.
+    static func pauseNeeded(after text: String, base: Double) -> Double {
+        let t = text.trimmingCharacters(in: .whitespaces)
+        let last = t.lowercased().components(separatedBy: CharacterSet.letters.union(CharacterSet(charactersIn: "'")).inverted).filter { !$0.isEmpty }.last ?? ""
+        let wordCount = t.split(separator: " ").count
+        if t.hasSuffix(",") || t.hasSuffix("…") || t.hasSuffix("...") || unfinished.contains(last) { return max(base * 2.2, 2.6) }
+        if t.hasSuffix("?") || t.hasSuffix("!") { return base * 0.85 }
+        if wordCount <= 2 { return max(base, 1.5) } // "Hey Watson", "Okay": often more is coming
+        return base
     }
 
     func finish(_ sid: Int) {
@@ -405,6 +456,7 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
             return
         }
         if outEngine.isRunning && !player.isPlaying { player.play() }
+        speakingNow.set(true)
         spokenText += " " + item.text
         let utterance = AVSpeechUtterance(string: item.text)
         utterance.voice = selectedVoice()
@@ -468,6 +520,8 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
 
     func checkIdle() {
         guard !isSpeaking else { return }
+        speakingNow.set(false)
+        if duckedAt != nil { unduck() }
         spokenText = ""
         announcedIds.removeAll()
         emit(["ev": "speak.idle"])
@@ -482,6 +536,8 @@ final class Voice: NSObject, AVSpeechSynthesizerDelegate {
         pending = 0
         synth.stopSpeaking(at: .immediate)
         if player.engine != nil { player.stop() }
+        speakingNow.set(false)
+        if duckedAt != nil { unduck() }
         if wasSpeaking {
             spokenText = reason == "bargein" ? spokenText : ""
             announcedIds.removeAll()
